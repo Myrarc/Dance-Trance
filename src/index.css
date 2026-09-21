@@ -147,6 +147,10 @@ header .sub {
   cursor: crosshair;
 }
 
+.stage canvas.skeleton-hidden {
+  opacity: 0;
+}
+
 .stage.mirrored video,
 .stage.mirrored canvas {
   transform: scaleX(-1);

@@ -29,6 +29,7 @@ import {
   syncLibrary,
   type VideoStats,
 } from './playkitClient'
+import { loadSkeletonsVisible, saveSkeletonsVisible } from './lib/skeletonVisibility'
 
 export default function App() {
   const [src, setSrc] = useState<string | null>(null)
@@ -40,6 +41,7 @@ export default function App() {
   const [focus, setFocus] = useState<Focus>('full')
   const [track, setTrack] = useState<PoseTrack | null>(null)
   const [analysing, setAnalysing] = useState<number | null>(null)
+  const [showSkeletons, setShowSkeletons] = useState(loadSkeletonsVisible)
   const targetRef = useRef<TargetPose>({
     feature: null,
     history: [],
@@ -204,6 +206,20 @@ export default function App() {
             {L(`Library (${library.length})`, `舞蹈库（${library.length}）`)}
           </button>
         )}
+        <button
+          className="btn subtle"
+          aria-pressed={!showSkeletons}
+          onClick={() =>
+            setShowSkeletons((visible) => {
+              const next = !visible
+              saveSkeletonsVisible(next)
+              return next
+            })
+          }
+          title={T('Show or hide both pose overlays')}
+        >
+          {T(showSkeletons ? 'Hide skeletons' : 'Show skeletons')}
+        </button>
         <label className="btn primary upload">
           {T(src ? 'Change video' : 'Load video')}
           <input
@@ -248,6 +264,7 @@ export default function App() {
             track={track}
             onAnalyse={() => void analyse()}
             analysing={analysing}
+            showSkeletons={showSkeletons}
           />
         ) : (
           <section
@@ -285,6 +302,7 @@ export default function App() {
           onSectionPractice={(deltas) => void recordSectionPractice(deltas)}
           focus={focus}
           onFocusChange={setFocus}
+          showSkeletons={showSkeletons}
         />
       </main>
 

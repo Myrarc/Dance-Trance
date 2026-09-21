@@ -32,6 +32,7 @@ interface Props {
   /** Which half of the body is being practised. */
   focus: Focus
   onFocusChange: (focus: Focus) => void
+  showSkeletons: boolean
 }
 
 export default function WebcamPanel({
@@ -41,6 +42,7 @@ export default function WebcamPanel({
   onSectionPractice,
   focus,
   onFocusChange,
+  showSkeletons,
 }: Props) {
   const focusRef = useRef<Focus>('full')
   focusRef.current = focus
@@ -313,7 +315,11 @@ export default function WebcamPanel({
 
       <div className="stage mirrored webcam-stage">
         <video ref={videoRef} playsInline muted />
-        <canvas ref={canvasRef} />
+        <canvas
+          ref={canvasRef}
+          className={showSkeletons ? undefined : 'skeleton-hidden'}
+          aria-hidden={!showSkeletons}
+        />
         {!running && (
           <div className="stage-overlay">
             <button className="btn primary" onClick={start} disabled={starting}>

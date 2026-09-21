@@ -51,6 +51,7 @@ interface Props {
   track?: PoseTrack | null
   onAnalyse?: () => void
   analysing?: number | null
+  showSkeletons: boolean
 }
 
 
@@ -128,6 +129,7 @@ export default function VideoPanel({
   track,
   onAnalyse,
   analysing,
+  showSkeletons,
 }: Props) {
   const trackRef = useRef<PoseTrack | null>(null)
   trackRef.current = track ?? null
@@ -713,7 +715,12 @@ export default function VideoPanel({
           onPlay={() => setPlaying(true)}
           onPause={() => setPlaying(false)}
         />
-        <canvas ref={canvasRef} onClick={onCanvasClick} />
+        <canvas
+          ref={canvasRef}
+          className={showSkeletons ? undefined : 'skeleton-hidden'}
+          aria-hidden={!showSkeletons}
+          onClick={onCanvasClick}
+        />
         </div>
       </div>
 
