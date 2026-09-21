@@ -163,6 +163,24 @@ header .sub {
   background: rgba(11, 11, 15, 0.7);
 }
 
+.tracking-diagnostics {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  max-width: calc(100% - 24px);
+  overflow: hidden;
+  padding: 5px 8px;
+  border: 1px solid var(--panel-border);
+  border-radius: 7px;
+  background: rgba(11, 11, 15, 0.78);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  backdrop-filter: blur(6px);
+}
+
 .error {
   color: var(--bad);
   font-size: 13px;
@@ -233,6 +251,21 @@ header .sub {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.problems {
+  flex: 0 0 100%;
+  min-width: 0;
+  height: 20px;
+}
+
+.watch-message {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ctrl-label {

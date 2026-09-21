@@ -17,6 +17,10 @@ const MODELS = [
     url: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
   },
   {
+    dest: join(root, 'public/models/pose_landmarker_full.task'),
+    url: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task',
+  },
+  {
     dest: join(root, 'public/models/hand_landmarker.task'),
     url: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
   },

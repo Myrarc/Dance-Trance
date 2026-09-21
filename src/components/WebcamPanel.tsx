@@ -6,6 +6,7 @@ import { drawSkeleton, LEVEL_COLORS } from '../pose/skeleton'
 import { computeAngles, compareToHistory, levelConnectionColors, dimmedSegments, HEAD, type Focus, type LagState, type PoseFeature } from '../pose/angles'
 import { LandmarkSmoother } from '../pose/filter'
 import { framingProblems } from '../pose/checkup'
+import { FrameMeter, frameTimestampMs, type FrameMetrics } from '../pose/frameMeter'
 import Checkup from './Checkup'
 
 /** Whether to mirror the comparison; 'auto' follows the reference's facing. */
@@ -75,6 +76,8 @@ export default function WebcamPanel({
   const [problems, setProblems] = useState<string[]>([])
   const [framing, setFraming] = useState<string[]>([])
   const [checking, setChecking] = useState(false)
+  const [capture, setCapture] = useState({ width: 0, height: 0, fps: 0 })
+  const [metrics, setMetrics] = useState<FrameMetrics | null>(null)
 
   mirrorModeRef.current = mirrorMode
 
@@ -106,12 +109,23 @@ export default function WebcamPanel({
     setStarting(true)
     setError(null)
     try {
-      landmarkerRef.current ??= await createPoseLandmarker(1)
+      landmarkerRef.current ??= await createPoseLandmarker(1, 'full')
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 960 }, height: { ideal: 540 }, facingMode: 'user' },
+        video: {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          frameRate: { ideal: 60, max: 60 },
+          facingMode: 'user',
+        },
         audio: false,
       })
       streamRef.current = stream
+      const settings = stream.getVideoTracks()[0]?.getSettings()
+      setCapture({
+        width: settings?.width ?? 0,
+        height: settings?.height ?? 0,
+        fps: settings?.frameRate ?? 0,
+      })
       const v = videoRef.current!
       v.srcObject = stream
       await v.play()
@@ -162,21 +176,32 @@ export default function WebcamPanel({
     setScore(null)
     setLag(null)
     setProblems([])
+    setMetrics(null)
     const cv = canvasRef.current
     cv?.getContext('2d')?.clearRect(0, 0, cv.width, cv.height)
   }
 
   useEffect(() => {
     if (!running) return
-    let raf = 0
-    const loop = () => {
-      raf = requestAnimationFrame(loop)
+    let handle = 0
+    let fallbackFrames = 0
+    let lastMetricsAt = 0
+    const meter = new FrameMeter()
+
+    const loop = (frameNow: number, metadata?: VideoFrameCallbackMetadata) => {
       const v = videoRef.current
+      if (v) {
+        if ('requestVideoFrameCallback' in v) handle = v.requestVideoFrameCallback(loop)
+        else handle = requestAnimationFrame((time) => loop(time))
+      }
       const cv = canvasRef.current
       const lmk = landmarkerRef.current
       if (!v || !cv || !lmk || v.readyState < 2 || v.videoWidth === 0) return
 
-      const res = lmk.detectForVideo(v, performance.now())
+      const presentedFrames = metadata?.presentedFrames ?? ++fallbackFrames
+      meter.record(presentedFrames, frameNow)
+      const timestampMs = frameTimestampMs(metadata?.mediaTime ?? Number.NaN, frameNow)
+      const res = lmk.detectForVideo(v, timestampMs)
       if (cv.width !== v.videoWidth || cv.height !== v.videoHeight) {
         cv.width = v.videoWidth
         cv.height = v.videoHeight
@@ -188,7 +213,7 @@ export default function WebcamPanel({
       const world = res.worldLandmarks[0]
       // Steady the landmarks before anything reads them, so a body holding
       // still produces a still skeleton and a steady score.
-      const pose = raw ? smootherRef.current.filter(raw, performance.now() / 1000) : undefined
+      const pose = raw ? smootherRef.current.filter(raw, timestampMs / 1000) : undefined
       const target = targetRef.current
       let frameScore: number | null = null
       let frameProblems: string[] = []
@@ -265,9 +290,18 @@ export default function WebcamPanel({
             : mirrorModeRef.current === 'mirror',
         )
       }
+      if (frameNow - lastMetricsAt >= 1000) {
+        lastMetricsAt = frameNow
+        setMetrics(meter.snapshot(frameNow))
+      }
     }
-    raf = requestAnimationFrame(loop)
-    return () => cancelAnimationFrame(raf)
+    const v = videoRef.current
+    if (v && 'requestVideoFrameCallback' in v) handle = v.requestVideoFrameCallback(loop)
+    else handle = requestAnimationFrame((time) => loop(time))
+    return () => {
+      if (v && 'cancelVideoFrameCallback' in v) v.cancelVideoFrameCallback(handle)
+      else cancelAnimationFrame(handle)
+    }
   }, [running, targetRef])
 
   return (
@@ -309,6 +343,13 @@ export default function WebcamPanel({
                 {lag < 0.15 ? 'in time' : `${lag.toFixed(1)}s behind`}
               </span>
             )}
+          </div>
+        )}
+        {running && metrics && (
+          <div className="tracking-diagnostics">
+            {capture.width}×{capture.height} · camera {capture.fps ? Math.round(capture.fps) : '—'} fps · tracking{' '}
+            {metrics.trackingFps} fps
+            {metrics.droppedFrames > 0 ? ` · skipped ${metrics.droppedFrames}` : ''}
           </div>
         )}
       </div>
@@ -360,12 +401,12 @@ export default function WebcamPanel({
                 : T('Sides: same side')}
           </button>
         </div>
-        <div className="ctrl-group problems">
-          {running && problems.length > 0 && (
-            <span className="hint">
-              {T('Watch')}: <b>{problems.join('、')}</b>
-            </span>
-          )}
+        <div className="ctrl-group problems" aria-live="polite">
+          <span className="hint watch-message" title={problems.join('、')}>
+            {running && problems.length > 0 ? (
+              <>{T('Watch')}: <b>{problems.join('、')}</b></>
+            ) : '\u00a0'}
+          </span>
         </div>
       </div>
     </section>

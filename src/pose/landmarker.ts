@@ -7,11 +7,13 @@ function getVision() {
   return visionPromise
 }
 
-export async function createPoseLandmarker(numPoses: number): Promise<PoseLandmarker> {
+export type PoseModel = 'lite' | 'full'
+
+export async function createPoseLandmarker(numPoses: number, model: PoseModel = 'lite'): Promise<PoseLandmarker> {
   const vision = await getVision()
   const options = {
     baseOptions: {
-      modelAssetPath: import.meta.env.BASE_URL + 'models/pose_landmarker_lite.task',
+      modelAssetPath: import.meta.env.BASE_URL + `models/pose_landmarker_${model}.task`,
       delegate: 'GPU' as const,
     },
     runningMode: 'VIDEO' as const,
