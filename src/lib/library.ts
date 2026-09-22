@@ -9,10 +9,13 @@
  */
 
 const DB_NAME = 'dance-trainer'
-const DB_VERSION = 2
+import type { ArcadeRecord } from '../game/records'
+
+const DB_VERSION = 3
 const META_STORE = 'library'
 const BLOB_STORE = 'videos'
 const TRACK_STORE = 'tracks'
+const ARCADE_RECORD_STORE = 'arcadeRecords'
 
 /** Above this a single file is indexed but not kept; re-pick it to reload. */
 const MAX_STORED_BYTES = 300 * 1024 * 1024
@@ -75,7 +78,7 @@ export interface LibraryEntry {
 
 let dbPromise: Promise<IDBDatabase> | null = null
 
-function openDb(): Promise<IDBDatabase> {
+export function openLibraryDatabase(): Promise<IDBDatabase> {
   dbPromise ??= new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION)
     req.onupgradeneeded = () => {
@@ -87,12 +90,18 @@ function openDb(): Promise<IDBDatabase> {
       // Analysed pose tracks, kept apart for the same reason as the footage:
       // listing the library must not drag megabytes off disk.
       if (!db.objectStoreNames.contains(TRACK_STORE)) db.createObjectStore(TRACK_STORE)
+      if (!db.objectStoreNames.contains(ARCADE_RECORD_STORE)) {
+        const records = db.createObjectStore(ARCADE_RECORD_STORE, { keyPath: 'id' })
+        records.createIndex('videoId', 'videoId')
+      }
     }
     req.onsuccess = () => resolve(req.result)
     req.onerror = () => reject(req.error)
   })
   return dbPromise
 }
+
+const openDb = openLibraryDatabase
 
 function tx<T>(store: string, mode: IDBTransactionMode, run: (s: IDBObjectStore) => IDBRequest<T>): Promise<T> {
   return openDb().then(
@@ -104,6 +113,30 @@ function tx<T>(store: string, mode: IDBTransactionMode, run: (s: IDBObjectStore)
         req.onerror = () => reject(req.error)
       }),
   )
+}
+
+export async function listArcadeRecords(): Promise<ArcadeRecord[]> {
+  try {
+    return await tx<ArcadeRecord[]>(ARCADE_RECORD_STORE, 'readonly', (store) => store.getAll())
+  } catch {
+    return []
+  }
+}
+
+export async function getArcadeRecord(id: string): Promise<ArcadeRecord | null> {
+  try {
+    return (await tx<ArcadeRecord | undefined>(ARCADE_RECORD_STORE, 'readonly', (store) => store.get(id))) ?? null
+  } catch {
+    return null
+  }
+}
+
+export async function putArcadeRecord(record: ArcadeRecord): Promise<void> {
+  await tx(ARCADE_RECORD_STORE, 'readwrite', (store) => store.put(record))
+}
+
+export async function putArcadeRecords(records: ArcadeRecord[]): Promise<void> {
+  for (const record of records) await putArcadeRecord(record)
 }
 
 /**

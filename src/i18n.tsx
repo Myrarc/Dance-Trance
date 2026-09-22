@@ -1,3 +1,4 @@
+/* oxlint-disable react/only-export-components -- this tiny external store and its button share one stable language source */
 // Tiny i18n with graceful fallback, ported from Investment Time Machine.
 // T(s) looks the English string up in the zh dictionary; anything missing
 // stays English — a gap can never break the UI. The chosen language is

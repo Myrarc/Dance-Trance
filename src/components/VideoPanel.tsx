@@ -265,8 +265,11 @@ export default function VideoPanel({
       setLoopA(null)
       setLoopB(null)
     } else if (gamePhase === 'playing') {
-      resetTargetClock()
-      video.currentTime = 0
+      const resuming = target.gameRun === gameRun && video.currentTime > 0
+      if (!resuming) {
+        resetTargetClock()
+        video.currentTime = 0
+      }
       let cancelled = false
       const play = () => {
         void video.play().then(() => {
@@ -279,6 +282,8 @@ export default function VideoPanel({
         cancelled = true
         video.removeEventListener('seeked', play)
       }
+    } else if (gamePhase === 'paused') {
+      video.pause()
     } else if (gamePhase === 'results') {
       video.pause()
       target.gameRun = 0

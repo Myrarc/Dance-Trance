@@ -1,56 +1,39 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import VideoPanel, { type TargetPose } from './components/VideoPanel'
-import WebcamPanel, { type ScoreDebug } from './components/WebcamPanel'
+import { lazy, Suspense, useCallback, useEffect, useReducer, useRef, useState } from 'react'
+import type { TargetPose } from './components/VideoPanel'
+import type { ScoreDebug } from './components/WebcamPanel'
 import AccountBar from './components/AccountBar'
 import Library from './components/Library'
-import { T, L, useLangTick, LangGlobe } from './i18n'
+import UpdateToast from './components/UpdateToast'
+import { Brand, HomeScreen, PauseOverlay, ResultsScreen, SettingsScreen, type ResultRecord } from './components/GameShell'
+import { T, L, useLangTick, LangGlobe, getLang, setLang } from './i18n'
 import { LEVEL_COLORS, SIDE_COLORS } from './pose/skeleton'
 import type { Focus } from './pose/angles'
+import type { AnalysisMetrics, PoseTrack } from './pose/track'
 import {
-  analyseVideo,
-  packTrack,
-  unpackTrack,
-  type AnalysisMetrics,
-  type PoseTrack,
-} from './pose/track'
-import {
-  addSectionPractice,
-  forget,
-  getTrack,
-  getVideo,
-  listLibrary,
-  mergeRemote,
-  remember,
-  saveSections,
-  saveTrack,
-  touch,
-  type LibraryEntry,
-  type Section,
+  addSectionPractice, forget, getArcadeRecord, getTrack, getVideo, listArcadeRecords,
+  listLibrary, mergeRemote, putArcadeRecord, putArcadeRecords, remember, saveSections,
+  saveTrack, touch, type LibraryEntry, type Section,
 } from './lib/library'
 import {
-  loadLibraryIndex,
-  loadSessions,
-  onAuthChange,
-  statsByVideo,
-  syncLibrary,
-  type VideoStats,
+  loadArcadeRecords, loadLibraryIndex, loadSessions, onAuthChange, statsByVideo,
+  syncArcadeRecords, syncLibrary, type VideoStats,
 } from './playkitClient'
-import { loadSkeletonsVisible, saveSkeletonsVisible } from './lib/skeletonVisibility'
-import { loadTrackHead, saveTrackHead } from './lib/headTrackPreference'
+import { loadGameSettings, saveGameSettings, type GameSettings } from './lib/gameSettings'
+import { playSfx } from './lib/sfx'
 import { accuracy, type GamePhase, type HitGrade, type PlayerRound } from './pose/gameplay'
 import type { CueEvent, Difficulty } from './pose/hitTargets'
 import type { GestureContext, MenuGesture } from './pose/gestures'
+import { gameReducer, initialGameState, type AppScreen } from './game/state'
+import { mergeCloudRecords, recordCompletedRound, recordsForCloud, type ArcadeRecord } from './game/records'
 
-type OnboardingStep = 'welcome' | 'camera' | 'gesture' | null
+const VideoPanel = lazy(() => import('./components/VideoPanel'))
+const WebcamPanel = lazy(() => import('./components/WebcamPanel'))
+
 const ONBOARDING_KEY = 'dance-trance:onboarding-complete'
 const DIFFICULTIES: Difficulty[] = ['easy', 'normal', 'hard']
 
-function initialOnboarding(): OnboardingStep {
-  try {
-    return localStorage.getItem(ONBOARDING_KEY) ? null : 'welcome'
-  } catch {
-    return 'welcome'
-  }
+function initialOnboarding() {
+  try { return !localStorage.getItem(ONBOARDING_KEY) } catch { return true }
 }
 
 function GestureIcon({ pose }: { pose: 'previous' | 'select' | 'next' }) {
@@ -71,101 +54,96 @@ function GestureGuide({ showBack = false }: { showBack?: boolean }) {
     { pose: 'select', label: 'Select' },
     { pose: 'next', label: 'Next' },
   ] as const
-
   return (
-    <div className="gesture-guide" aria-label="Gesture controls">
-      <strong className="gesture-guide-title">Gesture controls</strong>
+    <div className="gesture-guide" aria-label={T('Gesture controls')}>
+      <strong className="gesture-guide-title">{T('Gesture controls')}</strong>
       <div className="gesture-steps">
-        {steps.map(({ pose, label }) => (
-          <span className="gesture-step" key={pose}>
-            <GestureIcon pose={pose} />
-            <b>{label}</b>
-          </span>
-        ))}
+        {steps.map(({ pose, label }) => <span className="gesture-step" key={pose}><GestureIcon pose={pose} /><b>{T(label)}</b></span>)}
       </div>
-      {showBack && <small>Cross arms for songs / close</small>}
+      {showBack && <small>{T('Cross arms for songs / close')}</small>}
     </div>
   )
 }
 
+function LoadingStage() {
+  return <div className="loading-stage" role="status">{T('Loading the dance floor…')}</div>
+}
+
 export default function App() {
+  const [navigation, dispatch] = useReducer(gameReducer, initialGameState)
+  const activeScreen = navigation.screen === 'settings' ? navigation.returnScreen ?? 'home' : navigation.screen
   const [src, setSrc] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState(false)
   const [library, setLibrary] = useState<LibraryEntry[]>([])
+  const [records, setRecords] = useState<ArcadeRecord[]>([])
+  const [resultRecords, setResultRecords] = useState<ResultRecord[]>([])
   const [stats, setStats] = useState<Map<string, VideoStats>>(new Map())
   const [current, setCurrent] = useState<LibraryEntry | null>(null)
-  const [libraryOpen, setLibraryOpen] = useState(false)
   const [focus, setFocus] = useState<Focus>('full')
   const [track, setTrack] = useState<PoseTrack | null>(null)
   const [analysing, setAnalysing] = useState<number | null>(null)
   const [analysisMetrics, setAnalysisMetrics] = useState<AnalysisMetrics | null>(null)
   const [analysisMessage, setAnalysisMessage] = useState<string | null>(null)
-  const [showSkeletons, setShowSkeletons] = useState(loadSkeletonsVisible)
-  const [trackHead, setTrackHead] = useState(loadTrackHead)
-  const [gamePhase, setGamePhase] = useState<GamePhase>('lobby')
+  const [settings, setSettings] = useState<GameSettings>(() => ({ ...loadGameSettings(), language: getLang() }))
   const [difficulty, setDifficulty] = useState<Difficulty>('normal')
   const [countdown, setCountdown] = useState(3)
   const [gameRun, setGameRun] = useState(0)
   const [lobby, setLobby] = useState({ ready: false, players: 0 })
   const [gamePlayers, setGamePlayers] = useState<PlayerRound[]>([])
   const [scoreDebug, setScoreDebug] = useState<ScoreDebug[]>([])
-  const [hitFeedback, setHitFeedback] = useState<{
-    id: number
-    grade: Exclude<HitGrade, 'miss'>
-    target: CueEvent
-  } | null>(null)
+  const [hitFeedback, setHitFeedback] = useState<{ id: number; grade: Exclude<HitGrade, 'miss'>; target: CueEvent } | null>(null)
   const [gestureSelectedId, setGestureSelectedId] = useState<string | null>(null)
-  const [onboarding, setOnboarding] = useState<OnboardingStep>(initialOnboarding)
-  const targetRef = useRef<TargetPose>({
-    feature: null,
-    history: [],
-    time: 0,
-    gameRun: 0,
-    facing: null,
-    sectionId: null,
-  })
+  const [showWelcome, setShowWelcome] = useState(initialOnboarding)
+  const targetRef = useRef<TargetPose>({ feature: null, history: [], time: 0, gameRun: 0, facing: null, sectionId: null })
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const fileDestinationRef = useRef<AppScreen>('arcade')
   const hitFeedbackIdRef = useRef(0)
+  const comboMilestonesRef = useRef<number[]>([])
 
-  const completeOnboarding = () => {
+  const arcadePhase = navigation.arcadePhase
+  const gamePhase: GamePhase = arcadePhase === 'setup' || arcadePhase === 'registration' ? 'lobby' : arcadePhase
+
+  const completeOnboarding = (openArcade = false) => {
     try { localStorage.setItem(ONBOARDING_KEY, '1') } catch { /* Continue without persistence. */ }
-    setOnboarding(null)
+    setShowWelcome(false)
+    if (openArcade) dispatch({ type: 'openArcade' })
+  }
+
+  const go = (type: 'openHome' | 'openArcade' | 'openPractice' | 'openLibrary' | 'openSettings') => {
+    playSfx('menu', settings.soundMuted)
+    dispatch({ type })
+  }
+
+  const updateSettings = (next: GameSettings) => {
+    setSettings(next)
+    saveGameSettings(next)
+    setLang(next.language)
   }
 
   useEffect(() => {
-    return () => {
-      if (src) URL.revokeObjectURL(src)
-    }
-  }, [src])
+    document.documentElement.lang = settings.language === 'zh' ? 'zh-CN' : 'en'
+    document.documentElement.classList.toggle('reduce-effects', settings.reducedEffects)
+  }, [settings.language, settings.reducedEffects])
+
+  useEffect(() => () => { if (src) URL.revokeObjectURL(src) }, [src])
 
   const refresh = useCallback(async () => {
-    setLibrary(await listLibrary())
+    const [entries, localRecords] = await Promise.all([listLibrary(), listArcadeRecords()])
+    setLibrary(entries)
+    setRecords(localRecords)
   }, [])
 
-  /** Reconciles this device with the account, in both directions. */
   const syncFromAccount = useCallback(async () => {
-    // Push first. Most people play for a while and only sign up once they like
-    // it, so by the time an account exists the library already has entries in
-    // it — and pulling alone would silently strand every one of them on this
-    // device. syncLibrary is a no-op while signed out.
-    const local = await listLibrary()
-    if (local.length) {
-      await syncLibrary(
-        local.map((e) => ({
-          id: e.id,
-          name: e.name,
-          duration: e.duration,
-          lastOpenedAt: e.lastOpenedAt,
-        })),
-      )
+    const [localLibrary, localRecords] = await Promise.all([listLibrary(), listArcadeRecords()])
+    if (localLibrary.length) {
+      await syncLibrary(localLibrary.map((entry) => ({ id: entry.id, name: entry.name, duration: entry.duration, lastOpenedAt: entry.lastOpenedAt })))
     }
-
-    const [sessions, remote] = await Promise.all([loadSessions(), loadLibraryIndex()])
+    if (localRecords.length) await syncArcadeRecords(recordsForCloud(localRecords))
+    const [sessions, remoteLibrary, remoteRecords] = await Promise.all([loadSessions(), loadLibraryIndex(), loadArcadeRecords()])
     setStats(statsByVideo(sessions))
-    if (remote.length) {
-      await mergeRemote(remote)
-      await refresh()
-    }
+    if (remoteLibrary.length) await mergeRemote(remoteLibrary)
+    if (remoteRecords.length) await putArcadeRecords(mergeCloudRecords(localRecords, remoteRecords))
+    await refresh()
   }, [refresh])
 
   useEffect(() => {
@@ -174,8 +152,6 @@ export default function App() {
     return onAuthChange(() => void syncFromAccount())
   }, [refresh, syncFromAccount])
 
-  // A dance that has been analysed loads its track; anything else falls back to
-  // detecting live, so nothing here is required for the app to work.
   const currentId = current?.id ?? null
   useEffect(() => {
     let cancelled = false
@@ -183,19 +159,19 @@ export default function App() {
     setAnalysisMetrics(null)
     setAnalysisMessage(null)
     if (!currentId) return
-    void getTrack(currentId).then((stored) => {
+    void getTrack(currentId).then(async (stored) => {
+      const { unpackTrack } = await import('./pose/track')
       const decoded = stored ? unpackTrack(stored) : null
       if (!cancelled && decoded?.rhythmAnalysed) setTrack(decoded)
     })
-    return () => {
-      cancelled = true
-    }
+    return () => { cancelled = true }
   }, [currentId])
 
   useEffect(() => {
-    setGamePhase('lobby')
     setLobby({ ready: false, players: 0 })
     setGamePlayers([])
+    setResultRecords([])
+    comboMilestonesRef.current = []
   }, [currentId])
 
   useEffect(() => {
@@ -206,61 +182,98 @@ export default function App() {
   }, [gamePhase])
 
   useEffect(() => {
-    if (onboarding === 'camera' && lobby.ready) setOnboarding('gesture')
-  }, [lobby.ready, onboarding])
-
-  useEffect(() => {
-    if (!library.length) {
-      setGestureSelectedId(null)
-      return
-    }
-    setGestureSelectedId((selected) =>
-      selected && library.some((entry) => entry.id === selected)
-        ? selected
-        : currentId ?? library[0].id,
-    )
+    if (!library.length) return setGestureSelectedId(null)
+    setGestureSelectedId((selected) => selected && library.some((entry) => entry.id === selected) ? selected : currentId ?? library[0].id)
   }, [currentId, library])
 
   useEffect(() => {
-    if (gamePhase !== 'countdown') return
+    if (arcadePhase !== 'countdown') return
     setCountdown(3)
+    playSfx('countdown', settings.soundMuted)
     const started = performance.now()
+    let lastRemaining = 3
     const timer = window.setInterval(() => {
       const remaining = 3 - Math.floor((performance.now() - started) / 1000)
       if (remaining <= 0) {
         clearInterval(timer)
-        setGamePhase('playing')
-      } else setCountdown(remaining)
+        playSfx('go', settings.soundMuted)
+        dispatch({ type: 'countdownFinished' })
+      } else {
+        if (remaining !== lastRemaining) playSfx('countdown', settings.soundMuted)
+        lastRemaining = remaining
+        setCountdown(remaining)
+      }
     }, 100)
     return () => clearInterval(timer)
-  }, [gamePhase, gameRun])
+  }, [arcadePhase, gameRun, settings.soundMuted])
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || activeScreen !== 'arcade' || navigation.screen === 'settings') return
+      if (arcadePhase === 'playing') dispatch({ type: 'pause' })
+      else if (arcadePhase === 'paused') dispatch({ type: 'resume' })
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [activeScreen, arcadePhase, navigation.screen])
 
   const startRound = () => {
     if (!track || !lobby.ready) return
     setGamePlayers([])
+    setResultRecords([])
+    comboMilestonesRef.current = []
     setGameRun((run) => run + 1)
-    setGamePhase('countdown')
+    dispatch({ type: 'startCountdown' })
   }
 
-  const finishRound = () => {
-    setGamePhase((phase) => (phase === 'playing' ? 'results' : phase))
+  const finishRound = async () => {
+    if (arcadePhase !== 'playing') return
+    dispatch({ type: 'finishRound' })
+    if (!current || !gamePlayers.length) return
+    const completedAt = Date.now()
+    const outcomes: ResultRecord[] = []
+    for (let index = 0; index < gamePlayers.length; index++) {
+      const player = gamePlayers[index]
+      const playerSlot = (index + 1) as 1 | 2
+      const existing = await getArcadeRecord(`${current.id}:${difficulty}:${playerSlot}`)
+      const outcome = recordCompletedRound(existing, {
+        videoId: current.id, difficulty, playerSlot, score: player.score,
+        accuracy: accuracy(player), maxCombo: player.maxCombo, completedAt,
+      })
+      await putArcadeRecord(outcome.record)
+      outcomes.push(outcome)
+    }
+    setResultRecords(outcomes)
+    const fresh = await listArcadeRecords()
+    setRecords(fresh)
+    playSfx(outcomes.some((outcome) => outcome.isNewBest) ? 'record' : 'result', settings.soundMuted)
+    void syncArcadeRecords(recordsForCloud(fresh))
   }
 
   const updateLobby = useCallback((ready: boolean, players: number) => {
-    setLobby((current) => current.ready === ready && current.players === players ? current : { ready, players })
+    setLobby((value) => value.ready === ready && value.players === players ? value : { ready, players })
   }, [])
-
-  const updateGameScores = useCallback((players: PlayerRound[]) => setGamePlayers(players), [])
+  const updateGameScores = useCallback((players: PlayerRound[]) => {
+    players.forEach((player, index) => {
+      const previous = comboMilestonesRef.current[index] ?? 0
+      if (player.combo >= 5 && player.combo % 5 === 0 && player.combo !== previous) {
+        playSfx('combo', settings.soundMuted)
+      }
+      comboMilestonesRef.current[index] = player.combo
+    })
+    setGamePlayers(players)
+  }, [settings.soundMuted])
   const updateScoreDebug = useCallback((entries: ScoreDebug[]) => {
-    setScoreDebug((current) => {
-      const next = [...current]
+    setScoreDebug((currentScores) => {
+      const next = [...currentScores]
       for (const entry of entries) next[entry.player - 1] = entry
       return next
     })
   }, [])
   const showHit = useCallback((grade: Exclude<HitGrade, 'miss'>, target: CueEvent) => {
     setHitFeedback({ id: ++hitFeedbackIdRef.current, grade, target })
-  }, [])
+    playSfx(grade, settings.soundMuted)
+  }, [settings.soundMuted])
 
   const analyseBlob = async (entry: LibraryEntry, blob: Blob) => {
     if (analysing != null) return
@@ -268,13 +281,9 @@ export default function App() {
     setAnalysisMetrics(null)
     setAnalysisMessage(null)
     try {
-      const result = await analyseVideo(
-        blob,
-        (f) => setAnalysing(f),
-        () => false,
-        setAnalysisMetrics,
-        (reason) => setAnalysisMessage(`Fast analysis unavailable (${reason}); using compatibility mode`),
-      )
+      const { analyseVideo, packTrack } = await import('./pose/track')
+      const result = await analyseVideo(blob, setAnalysing, () => false, setAnalysisMetrics,
+        (reason) => setAnalysisMessage(`${T('Fast analysis unavailable')} (${reason}); ${T('using compatibility mode')}`))
       if (result) {
         await saveTrack(entry.id, packTrack(result))
         setTrack(result)
@@ -282,7 +291,7 @@ export default function App() {
         await refresh()
       }
     } catch (error) {
-      setAnalysisMessage(`Analysis failed: ${error instanceof Error ? error.message : String(error)}`)
+      setAnalysisMessage(`${T('Analysis failed')}: ${error instanceof Error ? error.message : String(error)}`)
     } finally {
       setAnalysing(null)
     }
@@ -301,54 +310,48 @@ export default function App() {
     })
   }
 
-  const loadFile = async (file: File | undefined | null) => {
+  const loadFile = async (file: File | undefined | null, destination: AppScreen = 'arcade') => {
     if (!file) return
-    if (!file.type.startsWith('video/')) {
-      alert('Please choose a video file')
-      return
-    }
+    if (!file.type.startsWith('video/')) return alert(T('Please choose a video file'))
     play(file)
-    setLibraryOpen(false)
     const entry = await remember(file)
     setCurrent(entry)
     await refresh()
+    dispatch({ type: destination === 'practice' ? 'openPractice' : 'openArcade' })
     if (entry) {
-      void syncLibrary([
-        { id: entry.id, name: entry.name, duration: entry.duration, lastOpenedAt: entry.lastOpenedAt },
-      ])
+      void syncLibrary([{ id: entry.id, name: entry.name, duration: entry.duration, lastOpenedAt: entry.lastOpenedAt }])
       const stored = await getTrack(entry.id)
+      const { unpackTrack } = await import('./pose/track')
       const decoded = stored ? unpackTrack(stored) : null
       if (decoded?.rhythmAnalysed) setTrack(decoded)
       else await analyseBlob(entry, file)
     }
   }
 
-  const openEntry = async (entry: LibraryEntry) => {
+  const openEntry = async (entry: LibraryEntry, destination: 'arcade' | 'practice' = 'arcade') => {
     const blob = await getVideo(entry.id)
     if (!blob) {
-      // The record survived but the file did not — the only way back is for the
-      // browser to hand us the file again.
+      fileDestinationRef.current = destination
       fileInputRef.current?.click()
       return
     }
     play(blob)
     setCurrent(entry)
-    setLibraryOpen(false)
     await touch(entry.id)
     await refresh()
+    dispatch({ type: destination === 'practice' ? 'openPractice' : 'openArcade' })
     const stored = await getTrack(entry.id)
+    const { unpackTrack } = await import('./pose/track')
     const decoded = stored ? unpackTrack(stored) : null
     if (decoded?.rhythmAnalysed) setTrack(decoded)
     else await analyseBlob(entry, blob)
   }
 
-  /** Sections belong to the dance, so they live with it in the library. */
   const updateSections = async (sections: Section[]) => {
     if (!current) return
     const ordered = [...sections].sort((a, b) => a.start - b.start)
-    // Update in place so the panel does not wait on a round trip to IndexedDB.
     setCurrent({ ...current, sections: ordered })
-    setLibrary((all) => all.map((e) => (e.id === current.id ? { ...e, sections: ordered } : e)))
+    setLibrary((all) => all.map((entry) => entry.id === current.id ? { ...entry, sections: ordered } : entry))
     await saveSections(current.id, ordered)
   }
 
@@ -357,359 +360,129 @@ export default function App() {
     await addSectionPractice(current.id, deltas)
     const fresh = await listLibrary()
     setLibrary(fresh)
-    setCurrent(fresh.find((e) => e.id === current.id) ?? current)
+    setCurrent(fresh.find((entry) => entry.id === current.id) ?? current)
   }
 
   const forgetEntry = async (entry: LibraryEntry) => {
     await forget(entry.id)
-    if (current?.id === entry.id) setCurrent(null)
+    if (current?.id === entry.id) {
+      setCurrent(null)
+      setSrc(null)
+    }
     await refresh()
   }
 
-  const libraryVisible = libraryOpen || !src
-  const gestureContext: GestureContext | null =
-    onboarding === 'gesture'
-      ? 'lobby'
-      : libraryVisible && library.length
-      ? 'library'
-      : src && gamePhase === 'results'
-        ? 'results'
-        : src && gamePhase === 'lobby' && lobby.ready
-          ? 'lobby'
-          : null
+  const openFilePicker = (destination: AppScreen) => {
+    fileDestinationRef.current = destination
+    fileInputRef.current?.click()
+  }
+
+  const gestureContext: GestureContext | null = activeScreen === 'library' && library.length
+    ? 'library'
+    : activeScreen === 'arcade' && arcadePhase === 'results'
+      ? 'results'
+      : activeScreen === 'arcade' && arcadePhase === 'registration' && lobby.ready ? 'lobby' : null
 
   const handleGestureAction = (gesture: MenuGesture) => {
-    if (onboarding === 'gesture') {
-      if (gesture === 'confirm') {
-        completeOnboarding()
-        if (library.length) setLibraryOpen(true)
-      }
-      return
-    }
     if (gestureContext === 'library') {
-      if (gesture === 'back' && src) {
-        setLibraryOpen(false)
-        return
-      }
+      if (gesture === 'back') dispatch({ type: 'openHome' })
       if (gesture === 'confirm') {
         const selected = library.find((entry) => entry.id === gestureSelectedId)
         if (selected) void openEntry(selected)
-        return
       }
       if (gesture === 'previous' || gesture === 'next') {
-        const currentIndex = Math.max(0, library.findIndex((entry) => entry.id === gestureSelectedId))
+        const index = Math.max(0, library.findIndex((entry) => entry.id === gestureSelectedId))
         const step = gesture === 'previous' ? -1 : 1
-        const nextIndex = (currentIndex + step + library.length) % library.length
-        setGestureSelectedId(library[nextIndex].id)
+        setGestureSelectedId(library[(index + step + library.length) % library.length].id)
       }
       return
     }
     if (gestureContext === 'lobby') {
       if (gesture === 'previous' || gesture === 'next') {
-        const currentIndex = DIFFICULTIES.indexOf(difficulty)
+        const index = DIFFICULTIES.indexOf(difficulty)
         const step = gesture === 'previous' ? -1 : 1
-        setDifficulty(DIFFICULTIES[(currentIndex + step + DIFFICULTIES.length) % DIFFICULTIES.length])
+        setDifficulty(DIFFICULTIES[(index + step + DIFFICULTIES.length) % DIFFICULTIES.length])
       }
       if (gesture === 'confirm') startRound()
-      if (gesture === 'back') setLibraryOpen(true)
+      if (gesture === 'back') dispatch({ type: 'openLibrary' })
       return
     }
     if (gestureContext === 'results') {
       if (gesture === 'confirm') startRound()
-      if (gesture === 'back') {
-        setGamePhase('lobby')
-        setLibraryOpen(true)
-      }
+      if (gesture === 'back') dispatch({ type: 'openLibrary' })
     }
   }
 
+  const renderHeader = (title: string) => (
+    <header className="app-header">
+      <button className="brand-button" onClick={() => go('openHome')} aria-label={T('Home')}><Brand compact /></button>
+      <span className="screen-label">{T(title)}</span>
+      <nav><button className="btn subtle" onClick={() => go('openLibrary')}>{L(`Library (${library.length})`, `舞蹈库（${library.length}）`)}</button><button className="btn subtle" onClick={() => go('openSettings')}>{T('Settings')}</button><AccountBar /></nav>
+    </header>
+  )
+
+  const renderTrackPicker = (destination: 'arcade' | 'practice') => (
+    <section className={`track-picker ${dragOver ? 'over' : ''}`}
+      onDragOver={(event) => { event.preventDefault(); setDragOver(true) }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={(event) => { event.preventDefault(); setDragOver(false); void loadFile(event.dataTransfer.files?.[0], destination) }}>
+      <div className="track-picker-copy">
+        <span className="kicker">{T(destination === 'arcade' ? 'Step 1 · Pick your song' : 'Practice your way')}</span>
+        <h1>{T(destination === 'arcade' ? 'Choose the routine.' : 'Build the routine.')}</h1>
+        <p>{T('Drop a dance video here or choose one from your device. Analysis stays local.')}</p>
+        <button className="btn primary" onClick={() => openFilePicker(destination)}>{T('Choose video')}</button>
+      </div>
+      <div className="picker-library"><h2>{T('Ready to play')}</h2><Library entries={library} stats={stats} records={records} currentId={currentId} selectedId={gestureSelectedId} onOpen={(entry) => void openEntry(entry, destination)} onForget={(entry) => void forgetEntry(entry)} emptyHint={T('Your prepared songs will appear here.')} /></div>
+    </section>
+  )
+
+  const renderPanels = (mode: 'arcade' | 'practice') => {
+    if (!src) return renderTrackPicker(mode)
+    const panelPhase: GamePhase = mode === 'practice' ? 'lobby' : gamePhase
+    return (
+      <Suspense fallback={<LoadingStage />}>
+        <main className={`panels ${mode === 'arcade' && ['countdown', 'playing', 'paused'].includes(gamePhase) ? 'game-active' : mode === 'arcade' && gamePhase === 'results' ? 'game-results-stage' : ''}`}>
+          <VideoPanel src={src} targetRef={targetRef} sections={current?.sections ?? []} sectionStats={current?.sectionStats} onSectionsChange={(sections) => void updateSections(sections)} focus={focus} track={track} onAnalyse={() => void analyse()} analysing={analysing} analysisMetrics={analysisMetrics} analysisMessage={analysisMessage} showSkeletons={settings.showSkeletons} trackHead={settings.trackHead} difficulty={difficulty} gamePhase={panelPhase} countdown={countdown} gameRun={gameRun} onGameEnd={() => void finishRound()} hitFeedback={hitFeedback} />
+          <WebcamPanel targetRef={targetRef} videoId={current?.id} videoName={current?.name} onSectionPractice={(deltas) => void recordSectionPractice(deltas)} focus={focus} onFocusChange={setFocus} showSkeletons={settings.showSkeletons} trackHead={settings.trackHead} gamePhase={panelPhase} gameRun={gameRun} onLobbyChange={updateLobby} onGameScores={updateGameScores} onHit={showHit} onScoreDebug={import.meta.env.DEV ? updateScoreDebug : undefined} gestureContext={mode === 'arcade' ? gestureContext : null} onGestureAction={handleGestureAction} />
+        </main>
+      </Suspense>
+    )
+  }
+
+  const renderArcade = () => {
+    if (arcadePhase === 'setup') {
+      return <div className="destination-wrap">{renderHeader('Arcade')}{!src ? renderTrackPicker('arcade') : (
+        <main className="arcade-setup-screen"><section className="setup-poster"><span className="kicker">{T('Step 1 · Song ready')}</span><h1>{current?.name ?? T('Your dance')}</h1><p>{analysing == null ? track ? T('Movement chart ready. Next, register the players.') : T('Preparing movement cues…') : `${T('Analysing')} ${Math.round(analysing * 100)}%`}</p>{analysisMessage && <p className="error">{analysisMessage}</p>}<div className="setup-actions"><button className="btn primary" disabled={!track} onClick={() => dispatch({ type: 'beginRegistration' })}>{T('Set up players')}</button><button className="btn" onClick={() => openFilePicker('arcade')}>{T('Change song')}</button></div></section><section className="setup-privacy"><strong>{T('Private by design')}</strong><span>{T('Video, camera frames, and pose landmarks stay on this device.')}</span></section></main>
+      )}</div>
+    }
+    return (
+      <div className={`destination-wrap ${['countdown', 'playing', 'paused'].includes(arcadePhase) ? 'game-screen-active' : ''}`}>
+        {renderHeader('Arcade')}
+        {arcadePhase === 'registration' && <section className="game-flow game-lobby" aria-live="polite"><div><strong>{lobby.ready ? L(`${lobby.players} player${lobby.players === 1 ? '' : 's'} ready`, `${lobby.players} 位玩家已准备`) : T('Player check')}</strong><span>{lobby.ready ? T('Choose a difficulty, then start.') : T('Enter the camera zones and hold a T-pose.')}</span></div><div className="difficulty-picker" role="group" aria-label={T('Difficulty')}>{DIFFICULTIES.map((level) => <button key={level} className={`difficulty-option${difficulty === level ? ' active' : ''}`} aria-pressed={difficulty === level} onClick={() => setDifficulty(level)}>{T(level)}</button>)}</div><button className="btn primary" onClick={startRound} disabled={!track || !lobby.ready}>{T('Start game')}</button></section>}
+        {arcadePhase === 'playing' && <section className="game-flow game-playing" aria-live="polite"><div className="game-score-strip">{(gamePlayers.length ? gamePlayers : Array.from({ length: Math.max(1, lobby.players) }, () => null)).map((player, index) => <span key={index}><b>P{index + 1}</b> {player?.score.toLocaleString() ?? '0'}<small>{player?.combo ? `${player.combo}× ${T('combo')}` : T('build your combo')}</small>{import.meta.env.DEV && scoreDebug[index] && <small className="score-debug">{scoreDebug[index].cue} · {scoreDebug[index].grade} · {Math.round(scoreDebug[index].lag * 1000)}ms</small>}</span>)}</div><button className="pause-button" onClick={() => dispatch({ type: 'pause' })} aria-label={T('Pause')}>Ⅱ</button></section>}
+        {arcadePhase === 'results' && <section className="game-flow game-results" aria-live="polite"><ResultsScreen players={gamePlayers} difficulty={difficulty} records={resultRecords} reducedEffects={settings.reducedEffects} onReplay={startRound} onChooseSong={() => dispatch({ type: 'openLibrary' })} onHome={() => dispatch({ type: 'quitHome' })} /></section>}
+        {renderPanels('arcade')}
+        {arcadePhase === 'paused' && navigation.screen !== 'settings' && <PauseOverlay onResume={() => dispatch({ type: 'resume' })} onRestart={() => { setGameRun((run) => run + 1); dispatch({ type: 'restart' }) }} onSettings={() => dispatch({ type: 'openSettings' })} onQuit={() => dispatch({ type: 'quitHome' })} />}
+      </div>
+    )
+  }
+
+  const renderPractice = () => <div className="destination-wrap">{renderHeader('Practice Studio')}{renderPanels('practice')}{src && <footer className="practice-legend"><span className="legend-group"><span className="legend-title">{T('Reference')}</span><span className="legend-item"><i style={{ background: SIDE_COLORS.left }} /> {T("dancer's left")}</span><span className="legend-item"><i style={{ background: SIDE_COLORS.right }} /> {T("dancer's right")}</span></span><span className="legend-group"><span className="legend-title">{T('You')}</span><span className="legend-item"><i style={{ background: LEVEL_COLORS.ok }} /> {T('matching')}</span><span className="legend-item"><i style={{ background: LEVEL_COLORS.warn }} /> {T('a bit off')}</span><span className="legend-item"><i style={{ background: LEVEL_COLORS.bad }} /> {T('way off')}</span></span></footer>}</div>
+
+  const renderLibrary = () => <div className="destination-wrap">{renderHeader('Library')}<main className="destination-screen library-screen"><div className="screen-title-row"><div><span className="kicker">{T('Your local collection')}</span><h1>{T('Library')}</h1></div><button className="btn primary" onClick={() => openFilePicker('arcade')}>{T('Add a dance')}</button></div>{library.length > 0 && <GestureGuide showBack />}<Library entries={library} stats={stats} records={records} currentId={currentId} selectedId={gestureSelectedId} onOpen={(entry) => void openEntry(entry)} onForget={(entry) => void forgetEntry(entry)} emptyHint={T('No songs yet. Add a dance video to build your library.')} /><p className="privacy-note">{T('Videos stay on this device. Signed-in accounts sync names, practice totals, and Player 1 records—not footage or landmarks.')}</p></main></div>
+
   useLangTick()
   return (
-    <div className={`app ${gamePhase === 'countdown' || gamePhase === 'playing' ? 'game-screen-active' : ''}`}>
+    <div className="app-shell">
       <LangGlobe />
-      {onboarding === 'welcome' && (
-        <section className="welcome-overlay" role="dialog" aria-modal="true" aria-labelledby="welcome-title">
-          <div className="welcome-card">
-            <span className="welcome-step">Ready when you are</span>
-            <h2 id="welcome-title">Your video.<br />Your moves.<br />Your arcade.</h2>
-            <p>Turn any dance video into a local one or two-player rhythm game. Camera and video processing stay on this device.</p>
-            <div className="welcome-actions">
-              <button className="btn primary" onClick={() => setOnboarding('camera')}>Let’s dance</button>
-              <button className="btn subtle" onClick={completeOnboarding}>Skip setup</button>
-            </div>
-          </div>
-        </section>
-      )}
-      <header>
-        <h1 className="brand-lockup">
-          <span className="brand-dance">Dance</span>
-          <span className="brand-trance">Trance</span>
-          <span className="sub">{T('Your moves light up the room')}</span>
-        </h1>
-        {library.length > 0 && (
-          <button
-            className={`btn ${libraryOpen ? 'active' : ''}`}
-            onClick={() => setLibraryOpen(!libraryOpen)}
-            title={T('Dances you have opened before')}
-          >
-            {L(`Library (${library.length})`, `舞蹈库（${library.length}）`)}
-          </button>
-        )}
-        <button
-          className="btn subtle"
-          aria-pressed={!showSkeletons}
-          onClick={() =>
-            setShowSkeletons((visible) => {
-              const next = !visible
-              saveSkeletonsVisible(next)
-              return next
-            })
-          }
-          title={T('Show or hide both pose overlays')}
-        >
-          {T(showSkeletons ? 'Hide skeletons' : 'Show skeletons')}
-        </button>
-        <button
-          className={`btn subtle ${!trackHead ? 'active' : ''}`}
-          aria-pressed={!trackHead}
-          onClick={() =>
-            setTrackHead((active) => {
-              const next = !active
-              saveTrackHead(next)
-              return next
-            })
-          }
-          title={T("Don't use head track — hides head hit markers and excludes head from score")}
-        >
-          {T(trackHead ? "Don't use head track" : 'Use head track')}
-        </button>
-        <label className="btn primary upload">
-          {T(src ? 'Change video' : 'Load video')}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="video/*"
-            hidden
-            onChange={(e) => {
-              void loadFile(e.target.files?.[0])
-              e.target.value = ''
-            }}
-          />
-        </label>
-        <AccountBar />
-        <button className="btn subtle" onClick={() => setOnboarding('welcome')}>Setup</button>
-      </header>
-
-      {onboarding === 'camera' && (
-        <aside className="onboarding-coach" aria-live="polite">
-          <b>1 / 2 · Meet the camera</b>
-          <strong>Turn on the camera, step into a zone, then hold a T-pose.</strong>
-          <span>We’ll continue as soon as you’re registered.</span>
-          <button className="btn subtle" onClick={completeOnboarding}>Skip</button>
-        </aside>
-      )}
-      {onboarding === 'gesture' && (
-        <aside className="onboarding-coach gesture-coach" aria-live="polite">
-          <b>2 / 2 · Your first control</b>
-          <span className="onboarding-gesture"><GestureIcon pose="select" /></span>
-          <strong>Raise your right hand and hold to continue.</strong>
-          <span>The live gesture meter will confirm it.</span>
-          <button className="btn subtle" onClick={completeOnboarding}>Skip</button>
-        </aside>
-      )}
-      {libraryOpen && library.length > 0 && (
-        <section className="library-panel">
-          <div className="library-title-row">
-            <h2>Pick a track</h2>
-            <span>Good songs · brighter moves</span>
-          </div>
-          <GestureGuide showBack />
-          <Library
-            entries={library}
-            stats={stats}
-            currentId={current?.id ?? null}
-            selectedId={gestureSelectedId}
-            onOpen={(e) => void openEntry(e)}
-            onForget={(e) => void forgetEntry(e)}
-          />
-          <p className="hint library-note">
-            Videos are kept on this device only. Signed in, the list and your practice totals follow
-            you; the footage does not.
-          </p>
-        </section>
-      )}
-
-      {src && gamePhase !== 'countdown' && (
-        <section className={`game-flow game-${gamePhase}`} aria-live="polite">
-          {gamePhase === 'lobby' && (
-            <>
-              <div>
-                <strong>{track ? (lobby.ready ? `${lobby.players} player${lobby.players === 1 ? '' : 's'} ready` : 'Player lobby') : 'Analysing song'}</strong>
-                <span>{!track ? 'Hit markers are required before playing' : lobby.ready ? 'Left or right arm selects difficulty · right hand confirms' : 'Enter the camera zones and hold a T-pose'}</span>
-              </div>
-              <div className="difficulty-picker" role="group" aria-label="Difficulty">
-                {DIFFICULTIES.map((level) => (
-                  <button
-                    key={level}
-                    className={`difficulty-option${difficulty === level ? ' active' : ''}`}
-                    aria-pressed={difficulty === level}
-                    onClick={() => setDifficulty(level)}
-                  >
-                    {level}
-                  </button>
-                ))}
-              </div>
-              <button className="btn primary" onClick={startRound} disabled={!track || !lobby.ready}>
-                Start game
-              </button>
-            </>
-          )}
-          {gamePhase === 'playing' && (
-            <div className="game-score-strip">
-              {(gamePlayers.length ? gamePlayers : Array.from({ length: Math.max(1, lobby.players) }, () => null)).map((player, index) => (
-                <span key={index}>
-                  <b>P{index + 1}</b> {player?.score.toLocaleString() ?? '0'}
-                  <small>{player?.combo ? `${player.combo}× combo` : 'build your combo'}</small>
-                  {import.meta.env.DEV && scoreDebug[index] && (
-                    <small className="score-debug">
-                      {scoreDebug[index].cue} · move {scoreDebug[index].movement?.toFixed(2) ?? '—'} · match {scoreDebug[index].match ?? '—'} · {scoreDebug[index].grade} · lag {Math.round(scoreDebug[index].lag * 1000)}ms
-                    </small>
-                  )}
-                </span>
-              ))}
-            </div>
-          )}
-          {gamePhase === 'results' && (
-            <div className="results-card">
-              <h2>Final score <small>{difficulty}</small></h2>
-              <div className={`result-players${gamePlayers.length > 1 ? ' is-multiplayer' : ''}`}>
-                {gamePlayers.map((player, index) => (
-                  <article key={index}>
-                    <h3>Player {index + 1}</h3>
-                    <strong className="result-score">{player.score.toLocaleString()}</strong>
-                    <div className="result-breakdown">
-                      <span>{accuracy(player)}% accuracy · {player.maxCombo}× max combo</span>
-                      <small>{player.perfect} perfect · {player.good} good · {player.miss} miss</small>
-                    </div>
-                  </article>
-                ))}
-              </div>
-              <div className="result-actions">
-                <button className="btn primary" onClick={startRound}>Play again</button>
-                <button className="btn" onClick={() => { setGamePhase('lobby'); setLibraryOpen(true) }}>Choose another song</button>
-              </div>
-              <p className="gesture-hint">Right hand up to replay · cross arms to choose a song</p>
-            </div>
-          )}
-        </section>
-      )}
-
-      <main className={`panels ${gamePhase === 'countdown' || gamePhase === 'playing' ? 'game-active' : gamePhase === 'results' ? 'game-results-stage' : ''}`}>
-        {src ? (
-          <VideoPanel
-            src={src}
-            targetRef={targetRef}
-            sections={current?.sections ?? []}
-            sectionStats={current?.sectionStats}
-            onSectionsChange={(sections) => void updateSections(sections)}
-            focus={focus}
-            track={track}
-            onAnalyse={() => void analyse()}
-            analysing={analysing}
-            analysisMetrics={analysisMetrics}
-            analysisMessage={analysisMessage}
-            showSkeletons={showSkeletons}
-            trackHead={trackHead}
-            difficulty={difficulty}
-            gamePhase={gamePhase}
-            countdown={countdown}
-            gameRun={gameRun}
-            onGameEnd={finishRound}
-            hitFeedback={hitFeedback}
-          />
-        ) : (
-          <section
-            className={`panel dropzone ${dragOver ? 'over' : ''}`}
-            onDragOver={(e) => {
-              e.preventDefault()
-              setDragOver(true)
-            }}
-            onDragLeave={() => setDragOver(false)}
-            onDrop={(e) => {
-              e.preventDefault()
-              setDragOver(false)
-              void loadFile(e.dataTransfer.files?.[0])
-            }}
-          >
-            <div className="drop-inner">
-              <p className="drop-title">Pick a track</p>
-              <p>{T('Drop a dance video here, or load one from the top right')}</p>
-              <p className="hint">
-                {T('Solo or group video · click a dancer to follow them · pose detection runs locally, your video is never uploaded')}
-              </p>
-              {library.length > 0 && (
-                <GestureGuide />
-              )}
-              <Library
-                entries={library}
-                stats={stats}
-                currentId={current?.id ?? null}
-                selectedId={gestureSelectedId}
-                onOpen={(e) => void openEntry(e)}
-                onForget={(e) => void forgetEntry(e)}
-              />
-            </div>
-          </section>
-        )}
-        <WebcamPanel
-          targetRef={targetRef}
-          videoId={current?.id}
-          videoName={current?.name}
-          onSectionPractice={(deltas) => void recordSectionPractice(deltas)}
-          focus={focus}
-          onFocusChange={setFocus}
-          showSkeletons={showSkeletons}
-          trackHead={trackHead}
-          gamePhase={gamePhase}
-          gameRun={gameRun}
-          onLobbyChange={updateLobby}
-          onGameScores={updateGameScores}
-          onHit={showHit}
-          onScoreDebug={import.meta.env.DEV ? updateScoreDebug : undefined}
-          gestureContext={gestureContext}
-          onGestureAction={handleGestureAction}
-        />
-      </main>
-
-      <footer>
-        <span className="legend-group">
-          <span className="legend-title">{T('Reference')}</span>
-          <span className="legend-item">
-            <i style={{ background: SIDE_COLORS.left }} /> {T("dancer's left")}
-          </span>
-          <span className="legend-item">
-            <i style={{ background: SIDE_COLORS.right }} /> {T("dancer's right")}
-          </span>
-          <span className="legend-item">
-            <i style={{ background: SIDE_COLORS.center }} /> {T('torso')}
-          </span>
-        </span>
-        <span className="legend-group">
-          <span className="legend-title">{T('You')}</span>
-          <span className="legend-item">
-            <i style={{ background: LEVEL_COLORS.ok }} /> {T('matching')}
-          </span>
-          <span className="legend-item">
-            <i style={{ background: LEVEL_COLORS.warn }} /> {T('a bit off')}
-          </span>
-          <span className="legend-item">
-            <i style={{ background: LEVEL_COLORS.bad }} /> {T('way off')}
-          </span>
-          <span className="legend-item">
-            <i style={{ background: LEVEL_COLORS.na }} /> {T('not compared')}
-          </span>
-        </span>
-      </footer>
+      <UpdateToast />
+      <input ref={fileInputRef} hidden type="file" accept="video/*" onChange={(event) => { void loadFile(event.target.files?.[0], fileDestinationRef.current); event.target.value = '' }} />
+      {activeScreen === 'home' && <HomeScreen libraryCount={library.length} onArcade={() => go('openArcade')} onPractice={() => go('openPractice')} onLibrary={() => go('openLibrary')} onSettings={() => go('openSettings')} account={<AccountBar />} />}
+      {activeScreen === 'arcade' && renderArcade()}
+      {activeScreen === 'practice' && renderPractice()}
+      {activeScreen === 'library' && renderLibrary()}
+      {navigation.screen === 'settings' && <SettingsScreen settings={settings} onChange={updateSettings} onClose={() => dispatch({ type: 'closeSettings' })} />}
+      {showWelcome && <section className="welcome-overlay" role="dialog" aria-modal="true" aria-labelledby="welcome-title"><div className="welcome-card"><span className="welcome-step">{T('Ready when you are')}</span><h2 id="welcome-title">{T('Your video.')}<br />{T('Your moves.')}<br />{T('Your arcade.')}</h2><p>{T('Turn any dance video into a local one or two-player rhythm game. Camera and video processing stay on this device.')}</p><div className="welcome-actions"><button className="btn primary" autoFocus onClick={() => completeOnboarding(true)}>{T('Let’s dance')}</button><button className="btn subtle" onClick={() => completeOnboarding()}>{T('Explore first')}</button></div></div></section>}
     </div>
   )
 }

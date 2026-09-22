@@ -6,7 +6,7 @@ import {
 } from './angles.ts'
 import type { CueEvent } from './hitTargets.ts'
 
-export type GamePhase = 'lobby' | 'countdown' | 'playing' | 'results'
+export type GamePhase = 'lobby' | 'countdown' | 'playing' | 'paused' | 'results'
 export type HitGrade = 'perfect' | 'good' | 'miss'
 
 export const HIT_WINDOW_S = 0.25

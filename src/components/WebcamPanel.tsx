@@ -1,4 +1,4 @@
-import { T } from '../i18n'
+import { L, T } from '../i18n'
 import { useEffect, useRef, useState } from 'react'
 import type { PoseLandmarker } from '@mediapipe/tasks-vision'
 import { createPoseLandmarker } from '../pose/landmarker'
@@ -176,7 +176,7 @@ export default function WebcamPanel({
   mirrorModeRef.current = mirrorMode
   gestureContextRef.current = gestureContext
   onGestureActionRef.current = onGestureAction
-  const gameplaySkeletonsVisible = showSkeletons || gamePhase === 'countdown' || gamePhase === 'playing'
+  const gameplaySkeletonsVisible = showSkeletons
 
   useEffect(() => {
     if (!gestureHoldRef.current.latched) {
@@ -657,12 +657,16 @@ export default function WebcamPanel({
       <div className="panel-head">
         <h2>{T('You')}</h2>
         <span className="hint">
-          {T(!running ? 'Turn on your camera to follow along' : lobbyReady ? `${playerSetup.count || 1} player${playerSetup.count === 1 ? '' : 's'} ready` : 'Player check')}
+          {!running
+            ? T('Turn on your camera to follow along')
+            : lobbyReady
+              ? L(`${playerSetup.count || 1} player${playerSetup.count === 1 ? '' : 's'} ready`, `${playerSetup.count || 1} 位玩家已准备`)
+              : T('Player check')}
         </span>
       </div>
 
       <div className="stage mirrored webcam-stage">
-        <video ref={videoRef} playsInline muted />
+        <video ref={videoRef} playsInline muted aria-hidden="true" />
         <canvas
           ref={canvasRef}
           className={gameplaySkeletonsVisible ? undefined : 'skeleton-hidden'}
@@ -674,15 +678,15 @@ export default function WebcamPanel({
               const detected = index < playerSetup.count
               const progress = playerSetup.progress[index] ?? 0
               const instruction = !detected
-                ? 'Step into this area'
+                ? T('Step into this area')
                 : !playerSetup.inZone[index]
-                  ? 'Move inside the area'
+                  ? T('Move inside the area')
                   : !playerSetup.tPose[index]
-                    ? 'Hold a T-pose'
+                    ? T('Hold a T-pose')
                     : `${Math.round(progress * 100)}%`
               return (
                 <div key={index} className={`player-zone ${progress >= 1 ? 'ready' : ''}`}>
-                  <strong>{playerSetup.count === 1 ? 'PLAYER' : `PLAYER ${index + 1}`}</strong>
+                  <strong>{playerSetup.count === 1 ? T('PLAYER') : `${T('PLAYER')} ${index + 1}`}</strong>
                   <span>{instruction}</span>
                   <i style={{ transform: `scaleX(${progress})` }} />
                 </div>
@@ -713,21 +717,21 @@ export default function WebcamPanel({
         {running && lobbyReady && !checking && (
           <div className="score-badge">
             <span className="score-num">{score ?? '—'}</span>
-            <span className="score-label">match</span>
+            <span className="score-label">{T('match')}</span>
             {lag !== null && (
               <span className="score-lag">
-                {lag < 0.15 ? 'in time' : `${lag.toFixed(1)}s behind`}
+                {lag < 0.15 ? T('in time') : L(`${lag.toFixed(1)}s behind`, `慢 ${lag.toFixed(1)} 秒`)}
               </span>
             )}
           </div>
         )}
         {running && lobbyReady && gestureContext && !checking && (
           <div className={`gesture-command${gestureFeedback.gesture ? '' : ' is-idle'}`} aria-live="polite">
-            <strong>{gestureFeedback.gesture ? gestureLabel(gestureFeedback.gesture, gestureContext) : 'Gesture controls ready'}</strong>
+            <strong>{gestureFeedback.gesture ? T(gestureLabel(gestureFeedback.gesture, gestureContext)) : T('Gesture controls ready')}</strong>
             <span>
               {gestureFeedback.gesture
-                ? gestureFeedback.progress >= 1 ? 'Return to neutral' : 'Hold steady'
-                : gestureContext === 'results' ? 'Right hand: replay · cross arms: songs' : 'Make a navigation gesture'}
+                ? gestureFeedback.progress >= 1 ? T('Return to neutral') : T('Hold steady')
+                : gestureContext === 'results' ? T('Right hand: replay · cross arms: songs') : T('Make a navigation gesture')}
             </span>
             <i style={{ transform: `scaleX(${gestureFeedback.progress})` }} />
           </div>

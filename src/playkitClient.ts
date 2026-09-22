@@ -1,4 +1,5 @@
 import { createPlaykit, type PlaykitUser } from './lib/playkit'
+import { mergeCloudRecordSets, type CloudArcadeRecord } from './game/records'
 
 /**
  * Optional accounts. With VITE_PLAYKIT_URL unset the trainer is entirely local:
@@ -61,6 +62,7 @@ export interface LibraryMeta {
 export interface PracticeSave {
   sessions: PracticeSession[]
   library?: LibraryMeta[]
+  arcadeRecords?: CloudArcadeRecord[]
 }
 
 /**
@@ -72,7 +74,11 @@ async function updateSave(mutate: (save: PracticeSave) => PracticeSave): Promise
   try {
     const existing = await playkit.loadProgress<PracticeSave>()
     const current: PracticeSave = existing?.data ?? { sessions: [] }
-    await playkit.saveProgress(mutate({ sessions: current.sessions ?? [], library: current.library }), existing?.version)
+    await playkit.saveProgress(mutate({
+      sessions: current.sessions ?? [],
+      library: current.library,
+      arcadeRecords: current.arcadeRecords,
+    }), existing?.version)
   } catch {
     // Practice data is a bonus; never let a failed sync surface mid-session.
   }
@@ -128,6 +134,18 @@ export async function syncLibrary(entries: LibraryMeta[]): Promise<void> {
 
 export async function loadLibraryIndex(): Promise<LibraryMeta[]> {
   return (await readSave())?.library ?? []
+}
+
+export async function syncArcadeRecords(records: CloudArcadeRecord[]): Promise<void> {
+  if (!records.length) return
+  await updateSave((save) => ({
+    ...save,
+    arcadeRecords: mergeCloudRecordSets(save.arcadeRecords ?? [], records),
+  }))
+}
+
+export async function loadArcadeRecords(): Promise<CloudArcadeRecord[]> {
+  return (await readSave())?.arcadeRecords ?? []
 }
 
 export interface VideoStats {
