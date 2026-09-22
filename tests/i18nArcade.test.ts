@@ -8,6 +8,7 @@ test('Chinese mode translates every remaining arcade and analysis status', () =>
     ['800 ms preview', '800 毫秒预览'],
     ['Analysing movement', '正在分析动作'],
     ['Analysis failed', '分析失败'],
+    ['Camera did not respond — check browser permission and try again', '摄像头没有响应——请检查浏览器权限后重试'],
     ['Fast analysis unavailable', '快速分析不可用'],
     ['No hit markers found in the analysed poses', '在已分析的姿态中没有找到打击点'],
     ['Right hand up to replay · cross arms to choose a song', '举起右手重玩 · 交叉双臂选择歌曲'],

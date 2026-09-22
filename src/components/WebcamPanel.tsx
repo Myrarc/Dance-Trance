@@ -7,6 +7,7 @@ import { computeAngles, compareToHistory, levelConnectionColors, dimmedSegments,
 import { LandmarkSmoother } from '../pose/filter'
 import { framingProblems } from '../pose/checkup'
 import { FrameMeter, frameTimestampMs, type FrameMetrics } from '../pose/frameMeter'
+import { CameraRequestTimeoutError, requestCameraStream } from '../lib/cameraStream'
 import Checkup from './Checkup'
 import {
   advanceGestureHold,
@@ -226,7 +227,7 @@ export default function WebcamPanel({
     setError(null)
     try {
       landmarkerRef.current ??= await createPoseLandmarker(2)
-      const stream = await navigator.mediaDevices.getUserMedia({
+      const stream = await requestCameraStream(navigator.mediaDevices, {
         video: {
           width: { ideal: 1280 },
           height: { ideal: 720 },
@@ -262,6 +263,8 @@ export default function WebcamPanel({
       setError(
         e instanceof DOMException && e.name === 'NotAllowedError'
           ? T('Camera permission denied — allow it in your browser settings')
+          : e instanceof CameraRequestTimeoutError
+            ? T('Camera did not respond — check browser permission and try again')
           : T('Could not start the camera'),
       )
     } finally {
