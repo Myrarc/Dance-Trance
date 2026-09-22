@@ -9,14 +9,21 @@ function useModalFocus(ref: RefObject<HTMLElement | null>) {
   useEffect(() => {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null
     const modal = ref.current
+    const focusableElements = () => modal
+      ? [...modal.querySelectorAll<HTMLElement>('button, input, [href], [tabindex]:not([tabindex="-1"])')]
+        .filter((element) => !element.hasAttribute('disabled'))
+      : []
+    const focusFrame = requestAnimationFrame(() => focusableElements()[0]?.focus())
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Tab' || !modal) return
-      const focusable = [...modal.querySelectorAll<HTMLElement>('button, input, [href], [tabindex]:not([tabindex="-1"])')]
-        .filter((element) => !element.hasAttribute('disabled'))
+      const focusable = focusableElements()
       if (!focusable.length) return
       const first = focusable[0]
       const last = focusable[focusable.length - 1]
-      if (event.shiftKey && document.activeElement === first) {
+      if (!modal.contains(document.activeElement)) {
+        event.preventDefault()
+        ;(event.shiftKey ? last : first).focus()
+      } else if (event.shiftKey && document.activeElement === first) {
         event.preventDefault()
         last.focus()
       } else if (!event.shiftKey && document.activeElement === last) {
@@ -26,6 +33,7 @@ function useModalFocus(ref: RefObject<HTMLElement | null>) {
     }
     document.addEventListener('keydown', onKeyDown)
     return () => {
+      cancelAnimationFrame(focusFrame)
       document.removeEventListener('keydown', onKeyDown)
       previous?.focus()
     }
@@ -102,6 +110,28 @@ export function HomeScreen({ libraryCount, onArcade, onPractice, onLibrary, onSe
   )
 }
 
+export function WelcomeOverlay({ onStart, onExplore }: {
+  onStart: () => void
+  onExplore: () => void
+}) {
+  const modalRef = useRef<HTMLElement>(null)
+  useModalFocus(modalRef)
+
+  return (
+    <section ref={modalRef} className="welcome-overlay" role="dialog" aria-modal="true" aria-labelledby="welcome-title">
+      <div className="welcome-card">
+        <span className="welcome-step">{T('Ready when you are')}</span>
+        <h2 id="welcome-title">{T('Your video.')}<br />{T('Your moves.')}<br />{T('Your arcade.')}</h2>
+        <p>{T('Turn any dance video into a local one or two-player rhythm game. Camera and video processing stay on this device.')}</p>
+        <div className="welcome-actions">
+          <button className="btn primary" onClick={onStart}>{T('Let’s dance')}</button>
+          <button className="btn subtle" onClick={onExplore}>{T('Explore first')}</button>
+        </div>
+      </div>
+    </section>
+  )
+}
+
 function Toggle({ label, detail, checked, onChange }: {
   label: string
   detail: string
@@ -128,10 +158,10 @@ export function SettingsScreen({ settings, onChange, onClose }: {
     onChange({ ...settings, [key]: value })
 
   return (
-    <main ref={modalRef} className="destination-screen settings-screen" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <main ref={modalRef} className="destination-screen settings-screen" role="dialog" aria-modal="true" aria-labelledby="settings-title" onKeyDown={(event) => { if (event.key === 'Escape') onClose() }}>
       <div className="screen-title-row">
         <div><span className="kicker">{T('Player preferences')}</span><h1 id="settings-title">{T('Settings')}</h1></div>
-        <button className="btn" onClick={onClose} autoFocus>{T('Back')}</button>
+        <button className="btn" onClick={onClose}>{T('Back')}</button>
       </div>
       <section className="settings-grid">
         <div className="settings-card">
@@ -167,7 +197,7 @@ export function PauseOverlay({ onResume, onRestart, onSettings, onQuit }: {
       <div className="pause-card">
         <span className="kicker">{T('Take a breath')}</span>
         <h2 id="pause-title">{T('Paused')}</h2>
-        <button className="btn primary" onClick={onResume} autoFocus>{T('Resume')}</button>
+        <button className="btn primary" onClick={onResume}>{T('Resume')}</button>
         <button className="btn" onClick={onRestart}>{T('Restart song')}</button>
         <button className="btn" onClick={onSettings}>{T('Settings')}</button>
         <button className="btn subtle" onClick={onQuit}>{T('Quit to Home')}</button>

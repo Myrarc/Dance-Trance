@@ -4,7 +4,7 @@ import type { ScoreDebug } from './components/WebcamPanel'
 import AccountBar from './components/AccountBar'
 import Library from './components/Library'
 import UpdateToast from './components/UpdateToast'
-import { Brand, HomeScreen, PauseOverlay, ResultsScreen, SettingsScreen, type ResultRecord } from './components/GameShell'
+import { Brand, HomeScreen, PauseOverlay, ResultsScreen, SettingsScreen, WelcomeOverlay, type ResultRecord } from './components/GameShell'
 import { T, L, useLangTick, LangGlobe, getLang, setLang } from './i18n'
 import { LEVEL_COLORS, SIDE_COLORS } from './pose/skeleton'
 import type { Focus } from './pose/angles'
@@ -482,7 +482,7 @@ export default function App() {
       {activeScreen === 'practice' && renderPractice()}
       {activeScreen === 'library' && renderLibrary()}
       {navigation.screen === 'settings' && <SettingsScreen settings={settings} onChange={updateSettings} onClose={() => dispatch({ type: 'closeSettings' })} />}
-      {showWelcome && <section className="welcome-overlay" role="dialog" aria-modal="true" aria-labelledby="welcome-title"><div className="welcome-card"><span className="welcome-step">{T('Ready when you are')}</span><h2 id="welcome-title">{T('Your video.')}<br />{T('Your moves.')}<br />{T('Your arcade.')}</h2><p>{T('Turn any dance video into a local one or two-player rhythm game. Camera and video processing stay on this device.')}</p><div className="welcome-actions"><button className="btn primary" autoFocus onClick={() => completeOnboarding(true)}>{T('Let’s dance')}</button><button className="btn subtle" onClick={() => completeOnboarding()}>{T('Explore first')}</button></div></div></section>}
+      {showWelcome && <WelcomeOverlay onStart={() => completeOnboarding(true)} onExplore={() => completeOnboarding()} />}
     </div>
   )
 }

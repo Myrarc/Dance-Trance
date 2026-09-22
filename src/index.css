@@ -899,9 +899,8 @@ header .sub {
 }
 
 .section-name:hover,
-.section-name:focus {
+.section-name:focus-visible {
   background: rgba(255, 255, 255, 0.07);
-  outline: none;
 }
 
 .section-sub {
@@ -1254,7 +1253,7 @@ footer {
   padding: 9px 11px; font: inherit; font-size: 13px; color: var(--text);
   background: var(--bg); border: 1px solid var(--panel-border); border-radius: 10px;
 }
-.acct-input:focus { outline: none; border-color: var(--accent); }
+.acct-input:focus { border-color: var(--accent); }
 
 .acct-error { margin: 0; font-size: 11px; color: var(--bad); }
 .acct-notice { margin: 0; font-size: 11px; line-height: 1.5; color: var(--ok); }
