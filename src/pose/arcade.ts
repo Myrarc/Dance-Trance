@@ -1,5 +1,5 @@
 import { SIDE_COLORS } from './skeleton'
-import type { HitJoint } from './hitTargets'
+import type { CueEvent, HitJoint } from './hitTargets'
 
 export const HIT_LEAD_S = 0.8
 
@@ -9,6 +9,12 @@ export const HIT_COLORS: Record<HitJoint, string> = {
   rightHand: SIDE_COLORS.right,
   leftFoot: SIDE_COLORS.left,
   rightFoot: SIDE_COLORS.right,
+}
+
+export function cueColor(cue: CueEvent) {
+  if (cue.kind === 'clap') return '#ee665f'
+  if (cue.kind === 'swing') return '#2cb8ba'
+  return HIT_COLORS[cue.joint]
 }
 
 export function drawHitRail(
@@ -138,6 +144,63 @@ export function drawArcadeHitLabel(
   ctx.strokeText('HIT', labelX, labelY)
   ctx.fillStyle = grade === 'perfect' ? '#2cb8ba' : '#e7aa33'
   ctx.fillText('HIT', labelX, labelY)
+  ctx.restore()
+}
+
+export function drawCueGlyph(
+  ctx: CanvasRenderingContext2D,
+  cue: CueEvent,
+  x: number,
+  y: number,
+  radius: number,
+  currentTime: number,
+  mirrored: boolean,
+) {
+  if (cue.kind === 'spot') return
+  const color = cueColor(cue)
+  const line = Math.max(3, radius * 0.09)
+  ctx.save()
+  ctx.globalCompositeOperation = 'lighter'
+  ctx.strokeStyle = color
+  ctx.fillStyle = color
+  ctx.lineWidth = line
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+  ctx.shadowColor = color
+  ctx.shadowBlur = radius * 0.25
+
+  if (cue.kind === 'hold') {
+    const start = cue.time - cue.duration
+    const progress = Math.max(0, Math.min(1, (currentTime - start) / cue.duration))
+    ctx.beginPath()
+    ctx.arc(x, y, radius * 1.38, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress)
+    ctx.stroke()
+    ctx.font = `800 ${Math.max(12, radius * 0.3)}px 'Trance Display', Impact, sans-serif`
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText('HOLD', x, y + radius * 1.72)
+  } else if (cue.kind === 'clap') {
+    for (const side of [-1, 1]) {
+      const outer = x + side * radius * 0.82
+      const inner = x + side * radius * 0.22
+      ctx.beginPath()
+      ctx.moveTo(outer, y - radius * 0.42)
+      ctx.lineTo(inner, y)
+      ctx.lineTo(outer, y + radius * 0.42)
+      ctx.stroke()
+    }
+  } else {
+    const direction = (cue.direction === 'right') !== mirrored ? 1 : -1
+    const startX = x - direction * radius * 0.72
+    const endX = x + direction * radius * 0.72
+    ctx.beginPath()
+    ctx.moveTo(startX, y)
+    ctx.lineTo(endX, y)
+    ctx.lineTo(endX - direction * radius * 0.34, y - radius * 0.3)
+    ctx.moveTo(endX, y)
+    ctx.lineTo(endX - direction * radius * 0.34, y + radius * 0.3)
+    ctx.stroke()
+  }
   ctx.restore()
 }
 

@@ -23,16 +23,18 @@ import { facing, type Facing } from '../pose/skeleton'
 import { LandmarkSmoother } from '../pose/filter'
 import { sampleTrack, type AnalysisMetrics, type PoseTrack } from '../pose/track'
 import {
-  buildHitTargets,
-  upcomingHitTargets,
-  type HitTarget,
+  buildCueChart,
+  upcomingCues,
+  type CueEvent,
+  type Difficulty,
 } from '../pose/hitTargets'
 import {
   HIT_LEAD_S,
-  HIT_COLORS,
+  cueColor,
   drawHitRail,
   drawArcadeHitLabel,
   drawArcadeHitMarker,
+  drawCueGlyph,
 } from '../pose/arcade'
 import SectionList from './SectionList'
 import { activeSection, newSectionId, type Section, type SectionStat } from '../lib/library'
@@ -50,8 +52,8 @@ export interface TargetPose {
   gameRun: number
   /** Which way the reference dancer is facing, or null when side-on. */
   facing: Facing | null
-  /** Hit targets from the analysed track, for rendering cues. */
-  hitTargets?: HitTarget[]
+  /** Typed gameplay chart generated from the analysed track. */
+  cueChart?: CueEvent[]
 }
 
 /** Video seconds of lag the comparison will forgive. */
@@ -72,11 +74,12 @@ interface Props {
   analysisMessage?: string | null
   showSkeletons: boolean
   trackHead?: boolean
+  difficulty?: Difficulty
   gamePhase?: GamePhase
   countdown?: number
   gameRun?: number
   onGameEnd?: () => void
-  hitFeedback?: { id: number; grade: Exclude<HitGrade, 'miss'>; target: HitTarget } | null
+  hitFeedback?: { id: number; grade: Exclude<HitGrade, 'miss'>; target: CueEvent } | null
 }
 
 
@@ -158,6 +161,7 @@ export default function VideoPanel({
   analysisMessage,
   showSkeletons,
   trackHead = true,
+  difficulty = 'normal',
   gamePhase = 'lobby',
   countdown = 3,
   gameRun = 0,
@@ -166,16 +170,14 @@ export default function VideoPanel({
 }: Props) {
   const trackRef = useRef<PoseTrack | null>(null)
   trackRef.current = track ?? null
-  const hitTargets = useMemo(
-    () => (track ? (trackHead ? buildHitTargets(track) : buildHitTargets(track).filter((t) => t.joint !== 'head')) : []),
-    [track, trackHead],
+  const cueChart = useMemo(
+    () => (track ? buildCueChart(track, difficulty, trackHead) : []),
+    [difficulty, track, trackHead],
   )
-  const hitTargetsRef = useRef(hitTargets)
-  hitTargetsRef.current = hitTargets
+  const cueChartRef = useRef(cueChart)
+  cueChartRef.current = cueChart
   const hitFeedbackRef = useRef(hitFeedback)
   hitFeedbackRef.current = hitFeedback
-  const trackHeadRef = useRef(trackHead)
-  trackHeadRef.current = trackHead
   const reduceMotionRef = useRef(false)
   const focusRef = useRef<Focus>('full')
   focusRef.current = focus
@@ -245,7 +247,7 @@ export default function VideoPanel({
     // A completed analysis or preference change can arrive while playback is paused at the same
     // timestamp; force the new track and its hit markers to paint once.
     lastTimeRef.current = -1
-  }, [track, trackHead])
+  }, [difficulty, track, trackHead])
 
   useEffect(() => {
     const video = videoRef.current
@@ -535,7 +537,7 @@ export default function VideoPanel({
         target.sectionId = activeSection(sectionsRef.current, v.currentTime)?.id ?? null
         // Side-on frames report nothing; hold the last confident reading.
         target.facing = facing(selected) ?? target.facing
-        target.hitTargets = hitTargetsRef.current
+        target.cueChart = cueChartRef.current
 
         // A seek or a loop makes earlier frames meaningless as "what they were
         // copying a moment ago", so the window restarts.
@@ -583,12 +585,7 @@ export default function VideoPanel({
       lastPoseRef.current = selected
 
       const markerRadius = Math.max(28, vh * 0.052)
-      const upcoming = upcomingHitTargets(
-        hitTargetsRef.current,
-        v.currentTime,
-        HIT_LEAD_S,
-        trackHeadRef.current,
-      )
+      const upcoming = upcomingCues(cueChartRef.current, v.currentTime, HIT_LEAD_S)
       const feedback = hitFeedbackRef.current
       if (
         feedback
@@ -605,8 +602,13 @@ export default function VideoPanel({
       for (let i = 1; i < points.length; i++) {
         const from = points[i - 1]
         const to = points[i]
-        if (to.target.time - from.target.time <= 0.35) {
-          drawHitRail(hitCtx, from, to, HIT_COLORS[to.target.joint], Math.max(4, vh / 150))
+        if (
+          from.target.kind === 'spot'
+          && to.target.kind === 'spot'
+          && from.target.joint === to.target.joint
+          && to.target.time - from.target.time <= 0.35
+        ) {
+          drawHitRail(hitCtx, from, to, cueColor(to.target), Math.max(4, vh / 150))
         }
       }
 
@@ -617,10 +619,11 @@ export default function VideoPanel({
           x,
           y,
           markerRadius,
-          HIT_COLORS[target.joint],
+          cueColor(target),
           remaining,
           reduceMotionRef.current,
         )
+        drawCueGlyph(hitCtx, target, x, y, markerRadius, v.currentTime, mirrorRef.current)
         if (feedback?.target === target && remaining <= 0 && remaining >= -0.45) {
           drawArcadeHitLabel(hitCtx, x, y, markerRadius, feedback.grade)
         }
@@ -844,11 +847,11 @@ export default function VideoPanel({
           {analysing != null && `${T('Analysing movement')} ${Math.round(analysing * 100)}%${analysisMessage ? ` · ${analysisMessage}` : ''}`}
           {analysing == null && analysisMessage && analysisMessage}
           {modelState === 'ready' && analysing == null && !analysisMessage && track &&
-            (hitTargets.length === 0
+            (cueChart.length === 0
               ? T('No hit markers found in the analysed poses')
               : analysisMetrics
-                ? `${hitTargets.length} ${T('hit markers ready')} · ${track.bpm ? `${Math.round(track.bpm)} BPM · ` : ''}${analysisMetrics.method} · ${(analysisMetrics.totalMs / 1000).toFixed(1)}s`
-                : `${hitTargets.length} ${T('hit markers ready')} · ${track.bpm ? `${Math.round(track.bpm)} BPM · ` : ''}${T('800 ms preview')}`)}
+                ? `${cueChart.length} ${T('hit markers ready')} · ${track.bpm ? `${Math.round(track.bpm)} BPM · ` : ''}${analysisMetrics.method} · ${(analysisMetrics.totalMs / 1000).toFixed(1)}s`
+                : `${cueChart.length} ${T('hit markers ready')} · ${track.bpm ? `${Math.round(track.bpm)} BPM · ` : ''}${T('800 ms preview')}`)}
           {modelState === 'ready' && analysing == null && !analysisMessage && !track && locked && T('Following one dancer · click another to switch')}
           {modelState === 'ready' && analysing == null && !analysisMessage && !track && !locked && personCount > 1 && T('Multiple dancers · click the one to follow')}
           {modelState === 'ready' && analysing == null && !analysisMessage && !track && !locked && personCount <= 1 && T('Click a dancer to lock on')}

@@ -38,11 +38,12 @@ import {
 import { loadSkeletonsVisible, saveSkeletonsVisible } from './lib/skeletonVisibility'
 import { loadTrackHead, saveTrackHead } from './lib/headTrackPreference'
 import { accuracy, type GamePhase, type HitGrade, type PlayerRound } from './pose/gameplay'
-import type { HitTarget } from './pose/hitTargets'
+import type { CueEvent, Difficulty } from './pose/hitTargets'
 import type { GestureContext, MenuGesture } from './pose/gestures'
 
 type OnboardingStep = 'welcome' | 'camera' | 'gesture' | null
 const ONBOARDING_KEY = 'dance-trance:onboarding-complete'
+const DIFFICULTIES: Difficulty[] = ['easy', 'normal', 'hard']
 
 function initialOnboarding(): OnboardingStep {
   try {
@@ -102,6 +103,7 @@ export default function App() {
   const [showSkeletons, setShowSkeletons] = useState(loadSkeletonsVisible)
   const [trackHead, setTrackHead] = useState(loadTrackHead)
   const [gamePhase, setGamePhase] = useState<GamePhase>('lobby')
+  const [difficulty, setDifficulty] = useState<Difficulty>('normal')
   const [countdown, setCountdown] = useState(3)
   const [gameRun, setGameRun] = useState(0)
   const [lobby, setLobby] = useState({ ready: false, players: 0 })
@@ -110,7 +112,7 @@ export default function App() {
   const [hitFeedback, setHitFeedback] = useState<{
     id: number
     grade: Exclude<HitGrade, 'miss'>
-    target: HitTarget
+    target: CueEvent
   } | null>(null)
   const [gestureSelectedId, setGestureSelectedId] = useState<string | null>(null)
   const [onboarding, setOnboarding] = useState<OnboardingStep>(initialOnboarding)
@@ -256,7 +258,7 @@ export default function App() {
       return next
     })
   }, [])
-  const showHit = useCallback((grade: Exclude<HitGrade, 'miss'>, target: HitTarget) => {
+  const showHit = useCallback((grade: Exclude<HitGrade, 'miss'>, target: CueEvent) => {
     setHitFeedback({ id: ++hitFeedbackIdRef.current, grade, target })
   }, [])
 
@@ -403,6 +405,11 @@ export default function App() {
       return
     }
     if (gestureContext === 'lobby') {
+      if (gesture === 'previous' || gesture === 'next') {
+        const currentIndex = DIFFICULTIES.indexOf(difficulty)
+        const step = gesture === 'previous' ? -1 : 1
+        setDifficulty(DIFFICULTIES[(currentIndex + step + DIFFICULTIES.length) % DIFFICULTIES.length])
+      }
       if (gesture === 'confirm') startRound()
       if (gesture === 'back') setLibraryOpen(true)
       return
@@ -538,7 +545,19 @@ export default function App() {
             <>
               <div>
                 <strong>{track ? (lobby.ready ? `${lobby.players} player${lobby.players === 1 ? '' : 's'} ready` : 'Player lobby') : 'Analysing song'}</strong>
-                <span>{!track ? 'Hit markers are required before playing' : lobby.ready ? 'Raise your right hand to start · cross arms for songs' : 'Enter the camera zones and hold a T-pose'}</span>
+                <span>{!track ? 'Hit markers are required before playing' : lobby.ready ? 'Left or right arm selects difficulty · right hand confirms' : 'Enter the camera zones and hold a T-pose'}</span>
+              </div>
+              <div className="difficulty-picker" role="group" aria-label="Difficulty">
+                {DIFFICULTIES.map((level) => (
+                  <button
+                    key={level}
+                    className={`difficulty-option${difficulty === level ? ' active' : ''}`}
+                    aria-pressed={difficulty === level}
+                    onClick={() => setDifficulty(level)}
+                  >
+                    {level}
+                  </button>
+                ))}
               </div>
               <button className="btn primary" onClick={startRound} disabled={!track || !lobby.ready}>
                 Start game
@@ -553,7 +572,7 @@ export default function App() {
                   <small>{player?.combo ? `${player.combo}× combo` : 'build your combo'}</small>
                   {import.meta.env.DEV && scoreDebug[index] && (
                     <small className="score-debug">
-                      {scoreDebug[index].joint} · move {scoreDebug[index].movement?.toFixed(0) ?? '—'}° · match {scoreDebug[index].match ?? '—'} · {scoreDebug[index].grade} · lag {Math.round(scoreDebug[index].lag * 1000)}ms
+                      {scoreDebug[index].cue} · move {scoreDebug[index].movement?.toFixed(2) ?? '—'} · match {scoreDebug[index].match ?? '—'} · {scoreDebug[index].grade} · lag {Math.round(scoreDebug[index].lag * 1000)}ms
                     </small>
                   )}
                 </span>
@@ -562,7 +581,7 @@ export default function App() {
           )}
           {gamePhase === 'results' && (
             <div className="results-card">
-              <h2>Final score</h2>
+              <h2>Final score <small>{difficulty}</small></h2>
               <div className={`result-players${gamePlayers.length > 1 ? ' is-multiplayer' : ''}`}>
                 {gamePlayers.map((player, index) => (
                   <article key={index}>
@@ -601,6 +620,7 @@ export default function App() {
             analysisMessage={analysisMessage}
             showSkeletons={showSkeletons}
             trackHead={trackHead}
+            difficulty={difficulty}
             gamePhase={gamePhase}
             countdown={countdown}
             gameRun={gameRun}

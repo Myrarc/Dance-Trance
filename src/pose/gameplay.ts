@@ -1,4 +1,10 @@
-import type { HitTarget } from './hitTargets'
+import {
+  compareHitAngles,
+  hitMovementDegrees,
+  MIN_HIT_MOVEMENT_DEG,
+  type PoseFeature,
+} from './angles.ts'
+import type { CueEvent } from './hitTargets.ts'
 
 export type GamePhase = 'lobby' | 'countdown' | 'playing' | 'results'
 export type HitGrade = 'perfect' | 'good' | 'miss'
@@ -22,6 +28,22 @@ export interface PlayerRound {
   bestMatch: number | null
 }
 
+export interface CueLandmark {
+  x: number
+  y: number
+  visibility?: number
+}
+
+export interface CueFrame {
+  feature: PoseFeature
+  landmarks: CueLandmark[]
+}
+
+export interface CueReading {
+  match: number | null
+  movement: number | null
+}
+
 export const newPlayerRound = (): PlayerRound => ({
   score: 0,
   combo: 0,
@@ -41,26 +63,26 @@ export function gradeMatch(match: number | null): HitGrade {
   return 'miss'
 }
 
-export function judgeDueTargets(
+export function judgeDueCues(
   player: PlayerRound,
-  match: number | null | ((target: HitTarget) => number | null),
+  match: number | null | ((cue: CueEvent) => number | null),
   time: number,
-  targets: HitTarget[],
+  cues: CueEvent[],
 ): PlayerRound {
   let next = player
   let sampled = false
-  while (next.nextTarget < targets.length) {
-    const target = targets[next.nextTarget]
-    if (time < target.time - HIT_WINDOW_S) break
+  while (next.nextTarget < cues.length) {
+    const cue = cues[next.nextTarget]
+    if (time < cue.time - HIT_WINDOW_S) break
 
-    if (!sampled && time <= target.time + HIT_WINDOW_S) {
-      const reading = typeof match === 'function' ? match(target) : match
+    if (!sampled && time <= cue.time + HIT_WINDOW_S) {
+      const reading = typeof match === 'function' ? match(cue) : match
       sampled = true
       if (reading !== null && (next.bestMatch === null || reading > next.bestMatch)) {
         next = { ...next, bestMatch: reading }
       }
     }
-    if (time < target.time + HIT_WINDOW_S) break
+    if (time < cue.time + HIT_WINDOW_S) break
 
     const grade = gradeMatch(next.bestMatch)
     const combo = grade === 'miss' ? 0 : next.combo + 1
@@ -80,6 +102,145 @@ export function judgeDueTargets(
     }
   }
   return next
+}
+
+const visible = (point: CueLandmark | undefined) =>
+  !!point && (point.visibility ?? 1) >= 0.5 && Number.isFinite(point.x) && Number.isFinite(point.y)
+
+const distance = (a: CueLandmark, b: CueLandmark) => Math.hypot(a.x - b.x, a.y - b.y)
+
+function bodyScale(landmarks: CueLandmark[]): number | null {
+  const leftShoulder = landmarks[11]
+  const rightShoulder = landmarks[12]
+  if (visible(leftShoulder) && visible(rightShoulder)) {
+    const width = distance(leftShoulder, rightShoulder)
+    if (width > 0.02) return width
+  }
+  const leftHip = landmarks[23]
+  const rightHip = landmarks[24]
+  if (!visible(leftShoulder) || !visible(rightShoulder) || !visible(leftHip) || !visible(rightHip)) return null
+  const shoulder = {
+    x: (leftShoulder.x + rightShoulder.x) / 2,
+    y: (leftShoulder.y + rightShoulder.y) / 2,
+  }
+  const hip = { x: (leftHip.x + rightHip.x) / 2, y: (leftHip.y + rightHip.y) / 2 }
+  const height = distance(shoulder, hip)
+  return height > 0.02 ? height : null
+}
+
+function wristGap(landmarks: CueLandmark[]): number | null {
+  const left = landmarks[15]
+  const right = landmarks[16]
+  const scale = bodyScale(landmarks)
+  return visible(left) && visible(right) && scale ? distance(left, right) / scale : null
+}
+
+function torsoX(landmarks: CueLandmark[]): number | null {
+  const points = [11, 12, 23, 24].map((index) => landmarks[index]).filter(visible)
+  return points.length >= 3 ? points.reduce((sum, point) => sum + point.x, 0) / points.length : null
+}
+
+function sampleNearAge(
+  history: { t: number; value: CueFrame }[],
+  now: number,
+  age: number,
+  tolerance: number,
+) {
+  let best: { t: number; value: CueFrame } | null = null
+  let bestDistance = Infinity
+  for (const sample of history) {
+    const difference = Math.abs(now - sample.t - age)
+    if (difference <= tolerance && difference < bestDistance) {
+      best = sample
+      bestDistance = difference
+    }
+  }
+  return best
+}
+
+/** Score one cue from a short per-player pose history. */
+export function scoreCue(
+  cue: CueEvent,
+  current: CueFrame | null,
+  history: { t: number; value: CueFrame }[],
+  now: number,
+  mirrored: boolean,
+  trackHead = true,
+): CueReading {
+  if (!current) return { match: null, movement: null }
+
+  if (cue.kind === 'spot') {
+    const previous = movementBaseline(history, now)
+    const movement = previous
+      ? hitMovementDegrees(previous.feature, current.feature, cue.joint, mirrored)
+      : null
+    const match = movement !== null && movement >= MIN_HIT_MOVEMENT_DEG
+      ? compareHitAngles(current.feature, cue.feature, cue.joint, mirrored, trackHead).score
+      : null
+    return { match, movement }
+  }
+
+  if (cue.kind === 'hold') {
+    const start = now - cue.duration
+    const samples = history.filter((sample) => sample.t >= start && sample.t <= now)
+    if (samples.length < 2) return { match: null, movement: null }
+    const coverage = (samples[samples.length - 1].t - samples[0].t) / cue.duration
+    if (coverage < 0.7) return { match: null, movement: coverage * 100 }
+    const scores = samples.map((sample) =>
+      compareHitAngles(sample.value.feature, cue.feature, cue.joint, mirrored, trackHead).score ?? 0,
+    )
+    return {
+      match: Math.round(scores.reduce((sum, value) => sum + value, 0) / scores.length),
+      movement: coverage * 100,
+    }
+  }
+
+  if (cue.kind === 'clap') {
+    const previous = movementBaseline(history, now, 0.25, 0.7)
+    const gap = wristGap(current.landmarks)
+    const previousGap = previous ? wristGap(previous.landmarks) : null
+    if (gap === null || previousGap === null) return { match: null, movement: null }
+    const closing = previousGap - gap
+    if (closing < 0.25) return { match: null, movement: closing }
+    const proximity = clamp(
+      100 - Math.max(0, gap - cue.expectedGap) / 0.4 * 100,
+      0,
+      100,
+    )
+    const left = compareHitAngles(current.feature, cue.feature, 'leftHand', mirrored, trackHead).score
+    const right = compareHitAngles(current.feature, cue.feature, 'rightHand', mirrored, trackHead).score
+    if (left === null && right === null) return { match: null, movement: closing }
+    const armPose = left === null ? right! : right === null ? left : (left + right) / 2
+    return { match: Math.round(proximity * 0.7 + armPose * 0.3), movement: closing }
+  }
+
+  const start = sampleNearAge(history, now, cue.duration, 0.3)
+  const recent = sampleNearAge(history, now, Math.min(0.25, cue.duration / 3), 0.18)
+  const currentX = torsoX(current.landmarks)
+  const startX = start ? torsoX(start.value.landmarks) : null
+  const recentX = recent ? torsoX(recent.value.landmarks) : null
+  const currentScale = bodyScale(current.landmarks)
+  const startScale = start ? bodyScale(start.value.landmarks) : null
+  if (currentX === null || startX === null || !currentScale || !startScale) {
+    return { match: null, movement: null }
+  }
+  const displacement = (currentX - startX) / ((currentScale + startScale) / 2)
+  const expected = mirrored ? -cue.displacement : cue.displacement
+  if (Math.sign(displacement) !== Math.sign(expected)) return { match: 0, movement: displacement }
+  if (Math.abs(displacement) < Math.abs(expected) * 0.5) return { match: 0, movement: displacement }
+  // Slow cameras may have no sample inside the final quarter-second. The
+  // displacement and timing gates still reject standing still in that case.
+  const recentMovement = recentX === null ? null : (currentX - recentX) / currentScale
+  const slowedOrReversed = recentMovement === null
+    || Math.sign(recentMovement) !== Math.sign(displacement)
+    || Math.abs(recentMovement) <= Math.abs(displacement) * 0.55
+  if (!slowedOrReversed) return { match: null, movement: displacement }
+  const ratio = Math.abs(displacement / expected)
+  return { match: Math.round(clamp(100 - Math.abs(ratio - 1) * 100, 0, 100)), movement: displacement }
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value))
 }
 
 /** The reference confirms a run only after its video has rewound and started. */

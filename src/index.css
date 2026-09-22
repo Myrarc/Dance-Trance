@@ -317,6 +317,35 @@ header .sub {
   font-size: 12px;
 }
 
+.difficulty-picker {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(70px, 1fr));
+  gap: 5px;
+  padding: 5px;
+  border: 3px solid var(--ink);
+  border-radius: 7px;
+  background: var(--panel);
+  box-shadow: 4px 4px 0 var(--ink);
+}
+
+.difficulty-option {
+  min-height: 40px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--ink);
+  background: transparent;
+  font-family: 'Trance Display', Impact, sans-serif;
+  font-size: 13px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.difficulty-option:hover { background: var(--panel-soft); }
+.difficulty-option.active { background: var(--cyan); }
+.difficulty-option:focus-visible { outline: 3px solid var(--cyan); outline-offset: 3px; }
+
 .game-flow-callout {
   width: 100%;
   color: var(--warn);
@@ -342,6 +371,14 @@ header .sub {
 
 .results-card { width: 100%; gap: 12px !important; }
 .results-card h2 { font-size: 20px; }
+.results-card h2 small {
+  margin-left: 8px;
+  color: var(--muted);
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-size: 12px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
 .result-players { display: grid !important; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
 .result-players article { padding: 12px; background: var(--panel-soft); border-radius: 12px; display: flex; flex-direction: column; gap: 3px; }
 .result-players h3 { color: var(--accent); font-size: 13px; }
@@ -1929,6 +1966,9 @@ input[type='range'] { accent-color: var(--accent); }
   .panel:nth-child(2) { box-shadow: 4px 4px 0 var(--cyan); }
   .result-actions { flex-wrap: wrap; }
   .result-actions .btn { flex: 1 1 170px; }
+  .game-lobby { flex-wrap: wrap; }
+  .difficulty-picker { order: 2; width: 100%; }
+  .game-lobby > .btn { order: 3; width: 100%; }
 }
 
 @media (prefers-reduced-motion: reduce) {

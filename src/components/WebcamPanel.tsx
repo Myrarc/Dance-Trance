@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { PoseLandmarker } from '@mediapipe/tasks-vision'
 import { createPoseLandmarker } from '../pose/landmarker'
 import { drawSkeleton, LEVEL_COLORS } from '../pose/skeleton'
-import { computeAngles, compareHitAngles, compareToHistory, hitMovementDegrees, MIN_HIT_MOVEMENT_DEG, levelConnectionColors, dimmedSegments, HEAD, type Focus, type LagState, type PoseFeature } from '../pose/angles'
+import { computeAngles, compareToHistory, levelConnectionColors, dimmedSegments, HEAD, type Focus, type LagState, type PoseFeature } from '../pose/angles'
 import { LandmarkSmoother } from '../pose/filter'
 import { framingProblems } from '../pose/checkup'
 import { FrameMeter, frameTimestampMs, type FrameMetrics } from '../pose/frameMeter'
@@ -20,17 +20,18 @@ import {
   type MenuGesture,
 } from '../pose/gestures'
 import {
-  judgeDueTargets,
+  judgeDueCues,
   isGameRunReady,
-  movementBaseline,
   newPlayerRound,
   gradeMatch,
+  scoreCue,
   stablePlayerOrder,
+  type CueFrame,
   type GamePhase,
   type HitGrade,
   type PlayerRound,
 } from '../pose/gameplay'
-import type { HitTarget } from '../pose/hitTargets'
+import type { CueEvent } from '../pose/hitTargets'
 
 /** Whether to mirror the comparison; 'auto' follows the reference's facing. */
 type MirrorMode = 'auto' | 'mirror' | 'direct'
@@ -72,7 +73,7 @@ interface Props {
   gameRun?: number
   onLobbyChange?: (ready: boolean, players: number) => void
   onGameScores?: (players: PlayerRound[]) => void
-  onHit?: (grade: Exclude<HitGrade, 'miss'>, target: HitTarget) => void
+  onHit?: (grade: Exclude<HitGrade, 'miss'>, target: CueEvent) => void
   onScoreDebug?: (entries: ScoreDebug[]) => void
   gestureContext?: GestureContext | null
   onGestureAction?: (gesture: MenuGesture) => void
@@ -80,7 +81,7 @@ interface Props {
 
 export interface ScoreDebug {
   player: number
-  joint: HitTarget['joint']
+  cue: CueEvent['kind']
   movement: number | null
   match: number | null
   lag: number
@@ -122,7 +123,7 @@ export default function WebcamPanel({
   const lagRef = useRef<number | null>(null)
   // The lag estimate persists between frames so it can settle.
   const lagStatesRef = useRef<LagState[]>([{ lag: 0 }, { lag: 0 }])
-  const movementHistoryRef = useRef<{ t: number; value: PoseFeature }[][]>([[], []])
+  const movementHistoryRef = useRef<{ t: number; value: CueFrame }[][]>([[], []])
   const playerSmoothersRef = useRef([new LandmarkSmoother(), new LandmarkSmoother()])
   const playerWorldSmoothersRef = useRef([new LandmarkSmoother(), new LandmarkSmoother()])
   const readyHoldRef = useRef([0, 0])
@@ -455,7 +456,7 @@ export default function WebcamPanel({
       const target = targetRef.current
       let frameScore: number | null = null
       const frameScores: (number | null)[] = Array.from({ length: registeredPlayerCount }, () => null)
-      const playerFeatures: (PoseFeature | null)[] = Array.from({ length: registeredPlayerCount }, () => null)
+      const playerFrames: (CueFrame | null)[] = Array.from({ length: registeredPlayerCount }, () => null)
       let frameProblems: string[] = []
       let frameLag: number | null = null
       if (pose && world && lobbyReadyRef.current) {
@@ -486,7 +487,7 @@ export default function WebcamPanel({
         })
         frameScore = cmp.score
         frameScores[scoreSlots[0] ?? 0] = cmp.score
-        playerFeatures[scoreSlots[0] ?? 0] = user
+        playerFrames[scoreSlots[0] ?? 0] = { feature: user, landmarks: pose }
         frameProblems = cmp.problems
         frameLag = cmp.lag
       }
@@ -507,7 +508,7 @@ export default function WebcamPanel({
           trackHeadRef.current,
         )
         frameScores[slot] = cmp.score
-        playerFeatures[slot] = second
+        playerFrames[slot] = { feature: second, landmarks: poses[1] }
         drawSkeleton(ctx, poses[1], cv.width, cv.height, {
           color: LEVEL_COLORS.na,
           lineWidth: 7,
@@ -517,63 +518,58 @@ export default function WebcamPanel({
         })
       }
 
-      if (gamePhase === 'playing' && isGameRunReady(target.gameRun, gameRun) && target.hitTargets?.length) {
+      if (gamePhase === 'playing' && isGameRunReady(target.gameRun, gameRun) && target.cueChart?.length) {
         const cameraTime = frameNow / 1000
         for (let index = 0; index < registeredPlayerCount; index++) {
-          const feature = playerFeatures[index]
-          if (!feature) continue
+          const frame = playerFrames[index]
+          if (!frame) continue
           const history = movementHistoryRef.current[index]
-          history.push({ t: cameraTime, value: feature })
-          while (history.length > 1 && history[0].t < cameraTime - 1) history.shift()
+          history.push({ t: cameraTime, value: frame })
+          while (history.length > 1 && history[0].t < cameraTime - 2.2) history.shift()
         }
         let changed = false
         let hitGrade: Exclude<HitGrade, 'miss'> | null = null
-        let hitTarget: HitTarget | null = null
+        let hitTarget: CueEvent | null = null
         const scoreDebug: ScoreDebug[] = []
         for (let index = 0; index < registeredPlayerCount; index++) {
           const before = roundsRef.current[index]
-          const feature = playerFeatures[index]
+          const frame = playerFrames[index]
           const mirrored = mirrorModeRef.current === 'auto'
             ? target.facing !== 'back'
             : mirrorModeRef.current === 'mirror'
-          const after = judgeDueTargets(
+          const after = judgeDueCues(
             before,
-            (hitTarget) => {
-              const previous = movementBaseline(movementHistoryRef.current[index], cameraTime)
-              const movement = feature && previous
-                ? hitMovementDegrees(previous, feature, hitTarget.joint, mirrored)
-                : null
-              const match = feature && movement !== null && movement >= MIN_HIT_MOVEMENT_DEG
-                ? compareHitAngles(
-                  feature,
-                  hitTarget.feature,
-                  hitTarget.joint,
-                  mirrored,
-                  trackHeadRef.current,
-                ).score
-                : null
+            (cue) => {
+              const reading = scoreCue(
+                cue,
+                frame,
+                movementHistoryRef.current[index],
+                cameraTime,
+                mirrored,
+                trackHeadRef.current,
+              )
               scoreDebug.push({
                 player: index + 1,
-                joint: hitTarget.joint,
-                movement,
-                match,
+                cue: cue.kind,
+                movement: reading.movement,
+                match: reading.match,
                 lag: lagStatesRef.current[index].lag,
-                grade: gradeMatch(match),
+                grade: gradeMatch(reading.match),
               })
-              return match
+              return reading.match
             },
             target.time,
-            target.hitTargets,
+            target.cueChart,
           )
           roundsRef.current[index] = after
           if (after !== before) {
             changed = true
             if (after.perfect > before.perfect) {
               hitGrade = 'perfect'
-              hitTarget = target.hitTargets[before.nextTarget]
+              hitTarget = target.cueChart[before.nextTarget]
             } else if (after.good > before.good && hitGrade !== 'perfect') {
               hitGrade = 'good'
-              hitTarget = target.hitTargets[before.nextTarget]
+              hitTarget = target.cueChart[before.nextTarget]
             }
           }
         }
