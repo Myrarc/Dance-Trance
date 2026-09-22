@@ -46,6 +46,9 @@ export interface StoredTrack {
   fps: number
   frames: number
   buffer: ArrayBuffer
+  bpm?: number
+  beatConfidence?: number
+  beats?: ArrayBuffer
 }
 
 export interface LibraryEntry {

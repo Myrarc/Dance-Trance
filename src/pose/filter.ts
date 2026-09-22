@@ -1,5 +1,3 @@
-import type { NormalizedLandmark } from '@mediapipe/tasks-vision'
-
 /**
  * One Euro filter for landmark streams.
  *
@@ -64,7 +62,7 @@ export class LandmarkSmoother {
   }
 
   /** `now` is in seconds. */
-  filter(lm: NormalizedLandmark[], now: number): NormalizedLandmark[] {
+  filter<T extends { x: number; y: number }>(lm: T[], now: number): T[] {
     const dt = this.last > 0 ? now - this.last : 0
     // Detections can arrive twice on one clock tick, and a long gap means the
     // history is stale; in both cases pass the frame through untouched.
@@ -88,7 +86,7 @@ export class LandmarkSmoother {
     })
   }
 
-  private seed(lm: NormalizedLandmark[]): void {
+  private seed(lm: { x: number; y: number }[]): void {
     this.state = lm.map((p) => [
       { x: p.x, dx: 0 },
       { x: p.y, dx: 0 },

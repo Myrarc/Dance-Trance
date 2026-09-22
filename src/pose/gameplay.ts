@@ -3,6 +3,12 @@ import type { HitTarget } from './hitTargets'
 export type GamePhase = 'lobby' | 'countdown' | 'playing' | 'results'
 export type HitGrade = 'perfect' | 'good' | 'miss'
 
+export const HIT_WINDOW_S = 0.25
+
+// These mirror the green/yellow limb tolerances: about 20° and 42° off target.
+const PERFECT_MATCH = 78
+const GOOD_MATCH = 53
+
 export interface PlayerRound {
   score: number
   combo: number
@@ -13,6 +19,7 @@ export interface PlayerRound {
   judged: number
   nextTarget: number
   lastGrade: HitGrade | null
+  bestMatch: number | null
 }
 
 export const newPlayerRound = (): PlayerRound => ({
@@ -25,23 +32,37 @@ export const newPlayerRound = (): PlayerRound => ({
   judged: 0,
   nextTarget: 0,
   lastGrade: null,
+  bestMatch: null,
 })
 
 export function gradeMatch(match: number | null): HitGrade {
-  if (match !== null && match >= 85) return 'perfect'
-  if (match !== null && match >= 65) return 'good'
+  if (match !== null && match >= PERFECT_MATCH) return 'perfect'
+  if (match !== null && match >= GOOD_MATCH) return 'good'
   return 'miss'
 }
 
 export function judgeDueTargets(
   player: PlayerRound,
-  match: number | null,
+  match: number | null | ((target: HitTarget) => number | null),
   time: number,
   targets: HitTarget[],
 ): PlayerRound {
   let next = player
-  while (next.nextTarget < targets.length && targets[next.nextTarget].time <= time) {
-    const grade = gradeMatch(match)
+  let sampled = false
+  while (next.nextTarget < targets.length) {
+    const target = targets[next.nextTarget]
+    if (time < target.time - HIT_WINDOW_S) break
+
+    if (!sampled && time <= target.time + HIT_WINDOW_S) {
+      const reading = typeof match === 'function' ? match(target) : match
+      sampled = true
+      if (reading !== null && (next.bestMatch === null || reading > next.bestMatch)) {
+        next = { ...next, bestMatch: reading }
+      }
+    }
+    if (time < target.time + HIT_WINDOW_S) break
+
+    const grade = gradeMatch(next.bestMatch)
     const combo = grade === 'miss' ? 0 : next.combo + 1
     const base = grade === 'perfect' ? 1000 : grade === 'good' ? 600 : 0
     next = {
@@ -55,9 +76,28 @@ export function judgeDueTargets(
       judged: next.judged + 1,
       nextTarget: next.nextTarget + 1,
       lastGrade: grade,
+      bestMatch: null,
     }
   }
   return next
+}
+
+/** The reference confirms a run only after its video has rewound and started. */
+export const isGameRunReady = (referenceRun: number, gameRun: number) =>
+  gameRun > 0 && referenceRun === gameRun
+
+/** Find a real earlier camera sample even when pose inference only runs at 2 FPS. */
+export function movementBaseline<T>(
+  history: { t: number; value: T }[],
+  now: number,
+  minAge = 0.2,
+  maxAge = 1,
+): T | null {
+  for (let index = history.length - 1; index >= 0; index--) {
+    const age = now - history[index].t
+    if (age >= minAge && age <= maxAge) return history[index].value
+  }
+  return null
 }
 
 export const accuracy = (player: PlayerRound) =>

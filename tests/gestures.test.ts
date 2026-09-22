@@ -52,11 +52,15 @@ test('recognises deliberate menu poses without treating a T-pose as navigation',
   Object.assign(p[16], { x: 0.61, y: 0.7 })
   assert.equal(detectMenuGesture(p), 'previous')
 
-  Object.assign(p[13], { x: 0.42, y: 0.35 })
-  Object.assign(p[15], { x: 0.43, y: 0.18 })
+  Object.assign(p[13], { x: 0.42, y: 0.58 })
+  Object.assign(p[15], { x: 0.43, y: 0.7 })
   Object.assign(p[14], { x: 0.58, y: 0.35 })
   Object.assign(p[16], { x: 0.57, y: 0.18 })
   assert.equal(detectMenuGesture(p), 'confirm')
+
+  Object.assign(p[13], { x: 0.42, y: 0.35 })
+  Object.assign(p[15], { x: 0.43, y: 0.18 })
+  assert.equal(detectMenuGesture(p), null)
 })
 
 test('fires once after a hold and rearms only after neutral', () => {

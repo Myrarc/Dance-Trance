@@ -85,12 +85,9 @@ export function detectMenuGesture(pose: NormalizedLandmark[] | undefined): MenuG
   const armYAllowance = shoulderWidth * 0.42
   const leftOutward = Math.sign(leftShoulder.x - rightShoulder.x)
 
-  const handsUp =
-    leftWrist.y < nose.y &&
-    rightWrist.y < nose.y &&
-    leftElbow.y < shoulderY &&
-    rightElbow.y < shoulderY
-  if (handsUp) return 'confirm'
+  const leftHandUp = leftWrist.y < nose.y && leftElbow.y < shoulderY
+  const rightHandUp = rightWrist.y < nose.y && rightElbow.y < shoulderY
+  if (rightHandUp && !leftHandUp) return 'confirm'
 
   const crossed =
     Math.hypot(leftWrist.x - rightShoulder.x, leftWrist.y - rightShoulder.y) < shoulderWidth * 0.62 &&

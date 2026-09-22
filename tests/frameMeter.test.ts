@@ -11,7 +11,7 @@ test('counts camera frames skipped while pose inference was busy', () => {
 
   assert.deepEqual(meter.snapshot(1000), {
     cameraFps: 4,
-    trackingFps: 3,
+    trackingFps: 2,
     droppedFrames: 2,
   })
 })

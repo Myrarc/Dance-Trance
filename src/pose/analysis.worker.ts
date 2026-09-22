@@ -6,6 +6,7 @@ import wasmBinaryPath from '@mediapipe/tasks-vision/vision_wasm_module_internal.
 import { createPoseLandmarker } from './landmarker'
 import { shouldInferFrame } from './adaptiveSampling'
 import { frameTimestampMs } from './frameMeter'
+import { analyseRhythm } from './rhythm'
 
 const SAMPLE_FPS = 15
 const VALUES_PER_LANDMARK = 6
@@ -137,6 +138,7 @@ worker.onmessage = async (event: MessageEvent<StartMessage>) => {
     }
 
     const packMs = fillCalmFrames(data, inferred)
+    const rhythm = await analyseRhythm(input).catch(() => null)
     const totalMs = performance.now() - started
     const metrics = {
       method: 'WebCodecs worker',
@@ -151,7 +153,16 @@ worker.onmessage = async (event: MessageEvent<StartMessage>) => {
       inputWidth: width,
       model: 'GPU preferred',
     }
-    worker.postMessage({ type: 'complete', fps: SAMPLE_FPS, frames, buffer: data.buffer, metrics }, [data.buffer])
+    worker.postMessage({
+      type: 'complete',
+      fps: SAMPLE_FPS,
+      frames,
+      buffer: data.buffer,
+      bpm: rhythm?.bpm,
+      beatConfidence: rhythm?.confidence,
+      beats: rhythm?.beats.buffer,
+      metrics,
+    }, rhythm ? [data.buffer, rhythm.beats.buffer] : [data.buffer])
   } catch (error) {
     worker.postMessage({
       type: 'error',

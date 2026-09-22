@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import VideoPanel, { type TargetPose } from './components/VideoPanel'
-import WebcamPanel from './components/WebcamPanel'
+import WebcamPanel, { type ScoreDebug } from './components/WebcamPanel'
 import AccountBar from './components/AccountBar'
 import Library from './components/Library'
 import { T, L, useLangTick, LangGlobe } from './i18n'
@@ -37,8 +37,55 @@ import {
 } from './playkitClient'
 import { loadSkeletonsVisible, saveSkeletonsVisible } from './lib/skeletonVisibility'
 import { loadTrackHead, saveTrackHead } from './lib/headTrackPreference'
-import { accuracy, type GamePhase, type PlayerRound } from './pose/gameplay'
+import { accuracy, type GamePhase, type HitGrade, type PlayerRound } from './pose/gameplay'
+import type { HitTarget } from './pose/hitTargets'
 import type { GestureContext, MenuGesture } from './pose/gestures'
+
+type OnboardingStep = 'welcome' | 'camera' | 'gesture' | null
+const ONBOARDING_KEY = 'dance-trance:onboarding-complete'
+
+function initialOnboarding(): OnboardingStep {
+  try {
+    return localStorage.getItem(ONBOARDING_KEY) ? null : 'welcome'
+  } catch {
+    return 'welcome'
+  }
+}
+
+function GestureIcon({ pose }: { pose: 'previous' | 'select' | 'next' }) {
+  return (
+    <svg viewBox="0 0 48 52" aria-hidden="true">
+      <circle cx="24" cy="8" r="5" />
+      <path d="M24 15V34M24 34L16 48M24 34L32 48" />
+      {pose === 'previous' && <path d="M24 20L14 23L4 23M24 20L34 27L36 38" />}
+      {pose === 'select' && <path d="M24 20L14 27L12 38M24 20L34 13L36 3" />}
+      {pose === 'next' && <path d="M24 20L14 27L12 38M24 20L34 23L44 23" />}
+    </svg>
+  )
+}
+
+function GestureGuide({ showBack = false }: { showBack?: boolean }) {
+  const steps = [
+    { pose: 'previous', label: 'Previous' },
+    { pose: 'select', label: 'Select' },
+    { pose: 'next', label: 'Next' },
+  ] as const
+
+  return (
+    <div className="gesture-guide" aria-label="Gesture controls">
+      <strong className="gesture-guide-title">Gesture controls</strong>
+      <div className="gesture-steps">
+        {steps.map(({ pose, label }) => (
+          <span className="gesture-step" key={pose}>
+            <GestureIcon pose={pose} />
+            <b>{label}</b>
+          </span>
+        ))}
+      </div>
+      {showBack && <small>Cross arms for songs / close</small>}
+    </div>
+  )
+}
 
 export default function App() {
   const [src, setSrc] = useState<string | null>(null)
@@ -59,15 +106,29 @@ export default function App() {
   const [gameRun, setGameRun] = useState(0)
   const [lobby, setLobby] = useState({ ready: false, players: 0 })
   const [gamePlayers, setGamePlayers] = useState<PlayerRound[]>([])
+  const [scoreDebug, setScoreDebug] = useState<ScoreDebug[]>([])
+  const [hitFeedback, setHitFeedback] = useState<{
+    id: number
+    grade: Exclude<HitGrade, 'miss'>
+    target: HitTarget
+  } | null>(null)
   const [gestureSelectedId, setGestureSelectedId] = useState<string | null>(null)
+  const [onboarding, setOnboarding] = useState<OnboardingStep>(initialOnboarding)
   const targetRef = useRef<TargetPose>({
     feature: null,
     history: [],
     time: 0,
+    gameRun: 0,
     facing: null,
     sectionId: null,
   })
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const hitFeedbackIdRef = useRef(0)
+
+  const completeOnboarding = () => {
+    try { localStorage.setItem(ONBOARDING_KEY, '1') } catch { /* Continue without persistence. */ }
+    setOnboarding(null)
+  }
 
   useEffect(() => {
     return () => {
@@ -122,7 +183,7 @@ export default function App() {
     if (!currentId) return
     void getTrack(currentId).then((stored) => {
       const decoded = stored ? unpackTrack(stored) : null
-      if (!cancelled && decoded) setTrack(decoded)
+      if (!cancelled && decoded?.rhythmAnalysed) setTrack(decoded)
     })
     return () => {
       cancelled = true
@@ -134,6 +195,17 @@ export default function App() {
     setLobby({ ready: false, players: 0 })
     setGamePlayers([])
   }, [currentId])
+
+  useEffect(() => {
+    if (gamePhase !== 'playing') {
+      setHitFeedback(null)
+      setScoreDebug([])
+    }
+  }, [gamePhase])
+
+  useEffect(() => {
+    if (onboarding === 'camera' && lobby.ready) setOnboarding('gesture')
+  }, [lobby.ready, onboarding])
 
   useEffect(() => {
     if (!library.length) {
@@ -177,6 +249,16 @@ export default function App() {
   }, [])
 
   const updateGameScores = useCallback((players: PlayerRound[]) => setGamePlayers(players), [])
+  const updateScoreDebug = useCallback((entries: ScoreDebug[]) => {
+    setScoreDebug((current) => {
+      const next = [...current]
+      for (const entry of entries) next[entry.player - 1] = entry
+      return next
+    })
+  }, [])
+  const showHit = useCallback((grade: Exclude<HitGrade, 'miss'>, target: HitTarget) => {
+    setHitFeedback({ id: ++hitFeedbackIdRef.current, grade, target })
+  }, [])
 
   const analyseBlob = async (entry: LibraryEntry, blob: Blob) => {
     if (analysing != null) return
@@ -234,7 +316,7 @@ export default function App() {
       ])
       const stored = await getTrack(entry.id)
       const decoded = stored ? unpackTrack(stored) : null
-      if (decoded) setTrack(decoded)
+      if (decoded?.rhythmAnalysed) setTrack(decoded)
       else await analyseBlob(entry, file)
     }
   }
@@ -254,7 +336,7 @@ export default function App() {
     await refresh()
     const stored = await getTrack(entry.id)
     const decoded = stored ? unpackTrack(stored) : null
-    if (decoded) setTrack(decoded)
+    if (decoded?.rhythmAnalysed) setTrack(decoded)
     else await analyseBlob(entry, blob)
   }
 
@@ -284,7 +366,9 @@ export default function App() {
 
   const libraryVisible = libraryOpen || !src
   const gestureContext: GestureContext | null =
-    libraryVisible && library.length
+    onboarding === 'gesture'
+      ? 'lobby'
+      : libraryVisible && library.length
       ? 'library'
       : src && gamePhase === 'results'
         ? 'results'
@@ -293,6 +377,13 @@ export default function App() {
           : null
 
   const handleGestureAction = (gesture: MenuGesture) => {
+    if (onboarding === 'gesture') {
+      if (gesture === 'confirm') {
+        completeOnboarding()
+        if (library.length) setLibraryOpen(true)
+      }
+      return
+    }
     if (gestureContext === 'library') {
       if (gesture === 'back' && src) {
         setLibraryOpen(false)
@@ -327,8 +418,21 @@ export default function App() {
 
   useLangTick()
   return (
-    <div className="app">
+    <div className={`app ${gamePhase === 'countdown' || gamePhase === 'playing' ? 'game-screen-active' : ''}`}>
       <LangGlobe />
+      {onboarding === 'welcome' && (
+        <section className="welcome-overlay" role="dialog" aria-modal="true" aria-labelledby="welcome-title">
+          <div className="welcome-card">
+            <span className="welcome-step">Ready when you are</span>
+            <h2 id="welcome-title">Your video.<br />Your moves.<br />Your arcade.</h2>
+            <p>Turn any dance video into a local one or two-player rhythm game. Camera and video processing stay on this device.</p>
+            <div className="welcome-actions">
+              <button className="btn primary" onClick={() => setOnboarding('camera')}>Let’s dance</button>
+              <button className="btn subtle" onClick={completeOnboarding}>Skip setup</button>
+            </div>
+          </div>
+        </section>
+      )}
       <header>
         <h1 className="brand-lockup">
           <span className="brand-dance">Dance</span>
@@ -386,18 +490,33 @@ export default function App() {
           />
         </label>
         <AccountBar />
+        <button className="btn subtle" onClick={() => setOnboarding('welcome')}>Setup</button>
       </header>
 
+      {onboarding === 'camera' && (
+        <aside className="onboarding-coach" aria-live="polite">
+          <b>1 / 2 · Meet the camera</b>
+          <strong>Turn on the camera, step into a zone, then hold a T-pose.</strong>
+          <span>We’ll continue as soon as you’re registered.</span>
+          <button className="btn subtle" onClick={completeOnboarding}>Skip</button>
+        </aside>
+      )}
+      {onboarding === 'gesture' && (
+        <aside className="onboarding-coach gesture-coach" aria-live="polite">
+          <b>2 / 2 · Your first control</b>
+          <span className="onboarding-gesture"><GestureIcon pose="select" /></span>
+          <strong>Raise your right hand and hold to continue.</strong>
+          <span>The live gesture meter will confirm it.</span>
+          <button className="btn subtle" onClick={completeOnboarding}>Skip</button>
+        </aside>
+      )}
       {libraryOpen && library.length > 0 && (
         <section className="library-panel">
           <div className="library-title-row">
             <h2>Pick a track</h2>
             <span>Good songs · brighter moves</span>
           </div>
-          <div className="gesture-guide">
-            <strong>Gesture controls</strong>
-            <span>One arm to browse · both hands up to select · cross arms to close</span>
-          </div>
+          <GestureGuide showBack />
           <Library
             entries={library}
             stats={stats}
@@ -419,7 +538,7 @@ export default function App() {
             <>
               <div>
                 <strong>{track ? (lobby.ready ? `${lobby.players} player${lobby.players === 1 ? '' : 's'} ready` : 'Player lobby') : 'Analysing song'}</strong>
-                <span>{!track ? 'Hit markers are required before playing' : lobby.ready ? 'Raise both hands to start · cross arms for songs' : 'Enter the camera zones and hold a T-pose'}</span>
+                <span>{!track ? 'Hit markers are required before playing' : lobby.ready ? 'Raise your right hand to start · cross arms for songs' : 'Enter the camera zones and hold a T-pose'}</span>
               </div>
               <button className="btn primary" onClick={startRound} disabled={!track || !lobby.ready}>
                 Start game
@@ -432,20 +551,27 @@ export default function App() {
                 <span key={index}>
                   <b>P{index + 1}</b> {player?.score.toLocaleString() ?? '0'}
                   <small>{player?.combo ? `${player.combo}× combo` : 'build your combo'}</small>
+                  {import.meta.env.DEV && scoreDebug[index] && (
+                    <small className="score-debug">
+                      {scoreDebug[index].joint} · move {scoreDebug[index].movement?.toFixed(0) ?? '—'}° · match {scoreDebug[index].match ?? '—'} · {scoreDebug[index].grade} · lag {Math.round(scoreDebug[index].lag * 1000)}ms
+                    </small>
+                  )}
                 </span>
               ))}
             </div>
           )}
           {gamePhase === 'results' && (
-            <div className="game-results">
-              <h2>Dance complete</h2>
-              <div className="result-players">
+            <div className="results-card">
+              <h2>Final score</h2>
+              <div className={`result-players${gamePlayers.length > 1 ? ' is-multiplayer' : ''}`}>
                 {gamePlayers.map((player, index) => (
                   <article key={index}>
                     <h3>Player {index + 1}</h3>
-                    <strong>{player.score.toLocaleString()}</strong>
-                    <span>{accuracy(player)}% accuracy · {player.maxCombo}× max combo</span>
-                    <small>{player.perfect} perfect · {player.good} good · {player.miss} miss</small>
+                    <strong className="result-score">{player.score.toLocaleString()}</strong>
+                    <div className="result-breakdown">
+                      <span>{accuracy(player)}% accuracy · {player.maxCombo}× max combo</span>
+                      <small>{player.perfect} perfect · {player.good} good · {player.miss} miss</small>
+                    </div>
                   </article>
                 ))}
               </div>
@@ -453,13 +579,13 @@ export default function App() {
                 <button className="btn primary" onClick={startRound}>Play again</button>
                 <button className="btn" onClick={() => { setGamePhase('lobby'); setLibraryOpen(true) }}>Choose another song</button>
               </div>
-              <p className="gesture-hint">Both hands up to replay · cross arms to choose a song</p>
+              <p className="gesture-hint">Right hand up to replay · cross arms to choose a song</p>
             </div>
           )}
         </section>
       )}
 
-      <main className="panels">
+      <main className={`panels ${gamePhase === 'countdown' || gamePhase === 'playing' ? 'game-active' : gamePhase === 'results' ? 'game-results-stage' : ''}`}>
         {src ? (
           <VideoPanel
             src={src}
@@ -479,6 +605,7 @@ export default function App() {
             countdown={countdown}
             gameRun={gameRun}
             onGameEnd={finishRound}
+            hitFeedback={hitFeedback}
           />
         ) : (
           <section
@@ -501,10 +628,7 @@ export default function App() {
                 {T('Solo or group video · click a dancer to follow them · pose detection runs locally, your video is never uploaded')}
               </p>
               {library.length > 0 && (
-                <div className="gesture-guide">
-                  <strong>Gesture controls</strong>
-                  <span>One arm to browse · both hands up to select</span>
-                </div>
+                <GestureGuide />
               )}
               <Library
                 entries={library}
@@ -530,6 +654,8 @@ export default function App() {
           gameRun={gameRun}
           onLobbyChange={updateLobby}
           onGameScores={updateGameScores}
+          onHit={showHit}
+          onScoreDebug={import.meta.env.DEV ? updateScoreDebug : undefined}
           gestureContext={gestureContext}
           onGestureAction={handleGestureAction}
         />

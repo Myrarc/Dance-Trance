@@ -24,10 +24,11 @@ export class FrameMeter {
   }
 
   snapshot(nowMs: number): FrameMetrics {
+    if (this.startedAt < 0) return { cameraFps: 0, trackingFps: 0, droppedFrames: 0 }
     const seconds = Math.max(0.001, (nowMs - this.startedAt) / 1000)
     return {
       cameraFps: Math.round((this.lastPresented - this.firstPresented) / seconds),
-      trackingFps: Math.round(this.processed / seconds),
+      trackingFps: Math.round(Math.max(0, this.processed - 1) / seconds),
       droppedFrames: this.dropped,
     }
   }

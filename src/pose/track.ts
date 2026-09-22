@@ -13,7 +13,7 @@ import type { Landmark3 } from './angles'
  */
 
 const SAMPLE_FPS = 15
-const TRACK_VERSION = 3
+const TRACK_VERSION = 4
 const MAX_INPUT_WIDTH = 640
 /** x, y, visibility for the drawn skeleton; x, y, z for the maths. */
 const VALUES_PER_LANDMARK = 6
@@ -25,6 +25,11 @@ export interface PoseTrack {
   frames: number
   /** Packed, `frames * STRIDE` long. NaN marks a frame with no dancer. */
   data: Float32Array
+  bpm?: number
+  beatConfidence?: number
+  beats?: Float32Array
+  /** False only for pre-BPM stored tracks that need one upgrade analysis. */
+  rhythmAnalysed?: boolean
 }
 
 export interface TrackFrame {
@@ -101,7 +106,15 @@ function analyseVideoInWorker(
         worker.terminate()
         onProgress(1)
         onMetrics?.(message.metrics)
-        resolve({ fps: message.fps, frames: message.frames, data: new Float32Array(message.buffer) })
+        resolve({
+          fps: message.fps,
+          frames: message.frames,
+          data: new Float32Array(message.buffer),
+          bpm: message.bpm,
+          beatConfidence: message.beatConfidence,
+          beats: message.beats ? new Float32Array(message.beats) : undefined,
+          rhythmAnalysed: true,
+        })
       }
     }
     worker.onerror = (event) => {
@@ -196,7 +209,22 @@ async function analyseVideoLegacy(
       inputWidth: canvas.width,
       model: 'gpu-or-cpu fallback',
     })
-    return { fps: SAMPLE_FPS, frames, data }
+    const [{ ALL_FORMATS, BlobSource, Input }, { analyseRhythm }] = await Promise.all([
+      import('mediabunny'),
+      import('./rhythm'),
+    ])
+    const input = new Input({ formats: ALL_FORMATS, source: new BlobSource(blob) })
+    const rhythm = await analyseRhythm(input).catch(() => null)
+    input.dispose()
+    return {
+      fps: SAMPLE_FPS,
+      frames,
+      data,
+      bpm: rhythm?.bpm,
+      beatConfidence: rhythm?.confidence,
+      beats: rhythm?.beats,
+      rhythmAnalysed: true,
+    }
   } finally {
     landmarker.close()
     URL.revokeObjectURL(url)
@@ -277,14 +305,41 @@ function read(track: PoseTrack, i: number, j: number, f: number): TrackFrame {
   return { landmarks, world }
 }
 
-export const packTrack = (t: PoseTrack): { version: number; fps: number; frames: number; buffer: ArrayBuffer } => ({
+export const packTrack = (t: PoseTrack): {
+  version: number
+  fps: number
+  frames: number
+  buffer: ArrayBuffer
+  bpm?: number
+  beatConfidence?: number
+  beats?: ArrayBuffer
+} => ({
   version: TRACK_VERSION,
   fps: t.fps,
   frames: t.frames,
   buffer: t.data.buffer.slice(0) as ArrayBuffer,
+  bpm: t.bpm,
+  beatConfidence: t.beatConfidence,
+  beats: t.beats?.buffer.slice(0) as ArrayBuffer | undefined,
 })
 
-export const unpackTrack = (p: { version?: number; fps: number; frames: number; buffer: ArrayBuffer }): PoseTrack | null =>
-  p.version === TRACK_VERSION
-    ? { fps: p.fps, frames: p.frames, data: new Float32Array(p.buffer) }
+export const unpackTrack = (p: {
+  version?: number
+  fps: number
+  frames: number
+  buffer: ArrayBuffer
+  bpm?: number
+  beatConfidence?: number
+  beats?: ArrayBuffer
+}): PoseTrack | null =>
+  p.version === TRACK_VERSION || p.version === 3
+    ? {
+        fps: p.fps,
+        frames: p.frames,
+        data: new Float32Array(p.buffer),
+        bpm: p.bpm,
+        beatConfidence: p.beatConfidence,
+        beats: p.beats ? new Float32Array(p.beats) : undefined,
+        rhythmAnalysed: p.version === TRACK_VERSION,
+      }
     : null

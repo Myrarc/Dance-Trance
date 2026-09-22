@@ -26,6 +26,7 @@ test('turns a hand movement endpoint into one timed hit target', () => {
   const hand = targets.find((target) => target.joint === 'leftHand')
   assert.ok(hand)
   assert.ok(hand.time >= 0.7 && hand.time <= 1.3)
+  assert.equal(hand.poseTime, hand.time)
   assert.ok(Math.abs(hand.x - 0.7) < 1e-6)
 })
 
@@ -39,10 +40,10 @@ test('starts finding hits when the dancer enters after an empty intro', () => {
 test('shows one upcoming target per body part inside the preview window', () => {
   const visible = upcomingHitTargets(
     [
-      { time: 1, joint: 'head', x: 0.5, y: 0.2 },
-      { time: 1.2, joint: 'head', x: 0.6, y: 0.2 },
-      { time: 1.1, joint: 'leftHand', x: 0.2, y: 0.4 },
-    ],
+      { time: 1, joint: 'head' as const, x: 0.5, y: 0.2 },
+      { time: 1.2, joint: 'head' as const, x: 0.6, y: 0.2 },
+      { time: 1.1, joint: 'leftHand' as const, x: 0.2, y: 0.4 },
+    ].map((target) => ({ ...target, poseTime: target.time, feature: {} })),
     0.5,
     0.8,
   )
@@ -52,12 +53,21 @@ test('shows one upcoming target per body part inside the preview window', () => 
 test('hides head hit targets when head tracking is disabled', () => {
   const visible = upcomingHitTargets(
     [
-      { time: 1, joint: 'head', x: 0.5, y: 0.2 },
-      { time: 1.1, joint: 'leftHand', x: 0.2, y: 0.4 },
-    ],
+      { time: 1, joint: 'head' as const, x: 0.5, y: 0.2 },
+      { time: 1.1, joint: 'leftHand' as const, x: 0.2, y: 0.4 },
+    ].map((target) => ({ ...target, poseTime: target.time, feature: {} })),
     0.5,
     0.8,
     false,
   )
   assert.deepEqual(visible.map((target) => target.joint), ['leftHand'])
+})
+
+test('snaps choreography to the beat grid and keeps one clear target per beat', () => {
+  const beatTrack: PoseTrack = { ...track, beats: new Float32Array([0.8, 1.6]), bpm: 75 }
+  const targets = buildHitTargets(beatTrack)
+
+  assert.equal(targets.length, 1)
+  assert.ok(Math.abs(targets[0].time - 0.8) < 1e-6)
+  assert.notEqual(targets[0].poseTime, targets[0].time)
 })

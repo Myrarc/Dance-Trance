@@ -1,12 +1,19 @@
+import { computeAngles, type PoseFeature } from './angles.ts'
 import type { PoseTrack } from './track'
 
 export type HitJoint = 'head' | 'leftHand' | 'rightHand' | 'leftFoot' | 'rightFoot'
 
 export interface HitTarget {
   time: number
+  poseTime: number
   joint: HitJoint
   x: number
   y: number
+  feature: PoseFeature
+}
+
+interface HitCandidate extends HitTarget {
+  strength: number
 }
 
 const VALUES_PER_LANDMARK = 6
@@ -49,9 +56,22 @@ function point(track: PoseTrack, frame: number, joint: HitJoint) {
 const distance = (a: { x: number; y: number }, b: { x: number; y: number }) =>
   Math.hypot(a.x - b.x, a.y - b.y)
 
+function featureAt(track: PoseTrack, frame: number): PoseFeature {
+  const world = Array.from({ length: 33 }, (_, landmark) => {
+    const offset = frame * STRIDE + landmark * VALUES_PER_LANDMARK
+    return {
+      x: track.data[offset + 3],
+      y: track.data[offset + 4],
+      z: track.data[offset + 5],
+      visibility: track.data[offset + 2],
+    }
+  })
+  return computeAngles(world)
+}
+
 /** Reduce the dense pose track to movement endpoints worth showing as cues. */
 export function buildHitTargets(track: PoseTrack): HitTarget[] {
-  const targets: HitTarget[] = []
+  const targets: HitCandidate[] = []
   const gap = Math.max(1, Math.round(track.fps * 0.45))
   const forceAfter = Math.max(gap, Math.round(track.fps * 1.2))
 
@@ -81,12 +101,38 @@ export function buildHitTargets(track: PoseTrack): HitTarget[] {
       const slowed = speedIn > 0.003 && speedOut < speedIn * 0.55
       if (!reversed && !slowed && frame - lastFrame < forceAfter) continue
 
-      targets.push({ time: frame / track.fps, joint, x: current.x, y: current.y })
+      targets.push({
+        time: frame / track.fps,
+        poseTime: frame / track.fps,
+        joint,
+        x: current.x,
+        y: current.y,
+        feature: featureAt(track, frame),
+        strength: distance(lastPoint, current) / MOVE_THRESHOLD[joint],
+      })
       lastFrame = frame
       lastPoint = current
     }
   }
-  return targets.sort((a, b) => a.time - b.time)
+  targets.sort((a, b) => a.time - b.time)
+  if (!track.beats?.length) return targets
+
+  const aligned = new Map<number, HitCandidate>()
+  for (const target of targets) {
+    let nearest = 0
+    while (
+      nearest + 1 < track.beats.length
+      && Math.abs(track.beats[nearest + 1] - target.time) < Math.abs(track.beats[nearest] - target.time)
+    ) nearest++
+    const beat = track.beats[nearest]
+    const previousBeat = track.beats[Math.max(0, nearest - 1)]
+    const nextBeat = track.beats[Math.min(track.beats.length - 1, nearest + 1)]
+    const beatGap = Math.max(0.25, Math.min(beat - previousBeat || Infinity, nextBeat - beat || Infinity))
+    if (Math.abs(beat - target.time) > Math.min(0.2, beatGap * 0.4)) continue
+    const current = aligned.get(nearest)
+    if (!current || target.strength > current.strength) aligned.set(nearest, { ...target, time: beat })
+  }
+  return [...aligned.values()].sort((a, b) => a.time - b.time)
 }
 
 /** One imminent cue per body part keeps the playfield readable. */

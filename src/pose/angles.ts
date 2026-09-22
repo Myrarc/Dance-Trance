@@ -1,4 +1,5 @@
 import { LM, type Level } from './skeleton.ts'
+import type { HitJoint } from './hitTargets.ts'
 
 /**
  * A landmark with real depth. MediaPipe returns these alongside the projected
@@ -218,6 +219,64 @@ export function compareAngles(
     levels,
     problems: errs.slice(0, 3).map((e) => e.label),
   }
+}
+
+const HIT_BONES: Record<HitJoint, string[]> = {
+  head: [HEAD],
+  leftHand: ['lUpperArm', 'lForearm'],
+  rightHand: ['rUpperArm', 'rForearm'],
+  leftFoot: ['lThigh', 'lShin'],
+  rightFoot: ['rThigh', 'rShin'],
+}
+
+export const MIN_HIT_MOVEMENT_DEG = 8
+
+const mirroredHitJoint = (joint: HitJoint): HitJoint => {
+  if (joint === 'leftHand') return 'rightHand'
+  if (joint === 'rightHand') return 'leftHand'
+  if (joint === 'leftFoot') return 'rightFoot'
+  if (joint === 'rightFoot') return 'leftFoot'
+  return joint
+}
+
+/** Score only the limb named by a hit marker; unrelated matching limbs cannot inflate it. */
+export function compareHitAngles(
+  user: PoseFeature,
+  target: PoseFeature,
+  joint: HitJoint,
+  mirrored: boolean,
+  trackHead = true,
+): Comparison {
+  const targetKeys = HIT_BONES[joint]
+  const userKeys = new Set(
+    targetKeys.map((key) => mirrored && key !== HEAD ? BONES.find((bone) => bone.name === key)!.mirror : key),
+  )
+  const relevant = Object.fromEntries(
+    Object.entries(user).map(([key, value]) => [key, userKeys.has(key) ? value : null]),
+  )
+  return compareAngles(relevant, target, mirrored, 'full', trackHead)
+}
+
+/** A held pose is not a dance hit: the marked limb must move into position near the beat. */
+export function hasHitMovement(
+  previous: PoseFeature,
+  current: PoseFeature,
+  joint: HitJoint,
+  mirrored: boolean,
+) {
+  const degrees = hitMovementDegrees(previous, current, joint, mirrored)
+  return degrees !== null && degrees >= MIN_HIT_MOVEMENT_DEG
+}
+
+export function hitMovementDegrees(
+  previous: PoseFeature,
+  current: PoseFeature,
+  joint: HitJoint,
+  mirrored: boolean,
+) {
+  const userJoint = mirrored ? mirroredHitJoint(joint) : joint
+  const score = compareHitAngles(current, previous, userJoint, false).score
+  return score === null ? null : (100 - score) * 0.9
 }
 
 /** One frame of the reference, kept so the comparison can tolerate lag. */

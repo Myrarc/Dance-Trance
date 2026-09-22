@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { PoseLandmarker } from '@mediapipe/tasks-vision'
 import { createPoseLandmarker } from '../pose/landmarker'
 import { drawSkeleton, LEVEL_COLORS } from '../pose/skeleton'
-import { computeAngles, compareToHistory, levelConnectionColors, dimmedSegments, HEAD, type Focus, type LagState, type PoseFeature } from '../pose/angles'
+import { computeAngles, compareHitAngles, compareToHistory, hitMovementDegrees, MIN_HIT_MOVEMENT_DEG, levelConnectionColors, dimmedSegments, HEAD, type Focus, type LagState, type PoseFeature } from '../pose/angles'
 import { LandmarkSmoother } from '../pose/filter'
 import { framingProblems } from '../pose/checkup'
 import { FrameMeter, frameTimestampMs, type FrameMetrics } from '../pose/frameMeter'
@@ -21,15 +21,23 @@ import {
 } from '../pose/gestures'
 import {
   judgeDueTargets,
+  isGameRunReady,
+  movementBaseline,
   newPlayerRound,
+  gradeMatch,
   stablePlayerOrder,
   type GamePhase,
+  type HitGrade,
   type PlayerRound,
 } from '../pose/gameplay'
+import type { HitTarget } from '../pose/hitTargets'
 
 /** Whether to mirror the comparison; 'auto' follows the reference's facing. */
 type MirrorMode = 'auto' | 'mirror' | 'direct'
 const READY_HOLD_MS = 1200
+const LIVE_INFERENCE_INTERVAL_MS = 50
+const LIVE_INPUT_WIDTH = 640
+const GESTURE_BEEP_GAP_MS = 400
 
 interface PlayerSetup {
   count: number
@@ -64,8 +72,19 @@ interface Props {
   gameRun?: number
   onLobbyChange?: (ready: boolean, players: number) => void
   onGameScores?: (players: PlayerRound[]) => void
+  onHit?: (grade: Exclude<HitGrade, 'miss'>, target: HitTarget) => void
+  onScoreDebug?: (entries: ScoreDebug[]) => void
   gestureContext?: GestureContext | null
   onGestureAction?: (gesture: MenuGesture) => void
+}
+
+export interface ScoreDebug {
+  player: number
+  joint: HitTarget['joint']
+  movement: number | null
+  match: number | null
+  lag: number
+  grade: HitGrade
 }
 
 export default function WebcamPanel({
@@ -81,6 +100,8 @@ export default function WebcamPanel({
   gameRun = 0,
   onLobbyChange,
   onGameScores,
+  onHit,
+  onScoreDebug,
   gestureContext = null,
   onGestureAction,
 }: Props) {
@@ -94,14 +115,16 @@ export default function WebcamPanel({
   const sectionClockRef = useRef(0)
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const inferenceCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const landmarkerRef = useRef<PoseLandmarker | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const emaRef = useRef<number | null>(null)
   const lagRef = useRef<number | null>(null)
   // The lag estimate persists between frames so it can settle.
-  const lagStateRef = useRef<LagState>({ lag: 0 })
-  const smootherRef = useRef(new LandmarkSmoother())
+  const lagStatesRef = useRef<LagState[]>([{ lag: 0 }, { lag: 0 }])
+  const movementHistoryRef = useRef<{ t: number; value: PoseFeature }[][]>([[], []])
   const playerSmoothersRef = useRef([new LandmarkSmoother(), new LandmarkSmoother()])
+  const playerWorldSmoothersRef = useRef([new LandmarkSmoother(), new LandmarkSmoother()])
   const readyHoldRef = useRef([0, 0])
   const stableCountRef = useRef({ count: 0, since: 0 })
   const lobbyReadyRef = useRef(false)
@@ -111,9 +134,12 @@ export default function WebcamPanel({
   const gestureHoldRef = useRef<GestureHold>({ candidate: null, since: 0, latched: false })
   const gestureContextRef = useRef(gestureContext)
   const onGestureActionRef = useRef(onGestureAction)
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const gestureSequenceRef = useRef(0)
   // Latest reading, so the guided check can sample without its own detector.
   const latestRef = useRef<{ feature: PoseFeature; framing: string[] } | null>(null)
   const lastUiRef = useRef(0)
+  const lastInferenceAtRef = useRef(0)
   const mirrorModeRef = useRef<MirrorMode>('auto')
 
   // Aggregates for the practice session, so a signed-in dancer keeps a history
@@ -149,6 +175,7 @@ export default function WebcamPanel({
   mirrorModeRef.current = mirrorMode
   gestureContextRef.current = gestureContext
   onGestureActionRef.current = onGestureAction
+  const gameplaySkeletonsVisible = showSkeletons || gamePhase === 'countdown' || gamePhase === 'playing'
 
   useEffect(() => {
     if (!gestureHoldRef.current.latched) {
@@ -159,8 +186,13 @@ export default function WebcamPanel({
 
   useEffect(() => {
     if (gamePhase !== 'countdown') return
+    // The reference video may still expose the previous round's final time for
+    // one camera frame while it is being rewound. Do not let that stale clock
+    // consume the new round's targets as misses.
     registeredPlayerCountRef.current = Math.max(1, playerSetupCountRef.current)
     roundsRef.current = [newPlayerRound(), newPlayerRound()]
+    lagStatesRef.current = [{ lag: 0 }, { lag: 0 }]
+    movementHistoryRef.current = [[], []]
     onGameScores?.(roundsRef.current.slice(0, registeredPlayerCountRef.current))
   }, [gamePhase, gameRun, onGameScores])
 
@@ -192,7 +224,7 @@ export default function WebcamPanel({
     setStarting(true)
     setError(null)
     try {
-      landmarkerRef.current ??= await createPoseLandmarker(2, 'full')
+      landmarkerRef.current ??= await createPoseLandmarker(2)
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           width: { ideal: 1280 },
@@ -212,6 +244,11 @@ export default function WebcamPanel({
       const v = videoRef.current!
       v.srcObject = stream
       await v.play()
+      const AudioContextClass = window.AudioContext ?? (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+      if (AudioContextClass) {
+        audioContextRef.current ??= new AudioContextClass()
+        await audioContextRef.current.resume()
+      }
       sessionRef.current = { startedAt: performance.now(), sum: 0, count: 0, best: 0 }
       readyHoldRef.current = [0, 0]
       stableCountRef.current = { count: 0, since: performance.now() }
@@ -229,6 +266,31 @@ export default function WebcamPanel({
     } finally {
       setStarting(false)
     }
+  }
+
+  const runGestureConfirmation = (gesture: MenuGesture) => {
+    const sequence = ++gestureSequenceRef.current
+    void (async () => {
+      for (let index = 0; index < 3; index++) {
+        if (sequence !== gestureSequenceRef.current) return
+        const audio = audioContextRef.current
+        if (audio) {
+          const oscillator = audio.createOscillator()
+          const gain = audio.createGain()
+          oscillator.type = 'square'
+          oscillator.frequency.value = index === 1 ? 660 : 880
+          gain.gain.setValueAtTime(0.0001, audio.currentTime)
+          gain.gain.exponentialRampToValueAtTime(0.35, audio.currentTime + 0.01)
+          gain.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + 0.1)
+          oscillator.connect(gain)
+          gain.connect(audio.destination)
+          oscillator.start()
+          oscillator.stop(audio.currentTime + 0.11)
+        }
+        if (index < 2) await new Promise((resolve) => window.setTimeout(resolve, GESTURE_BEEP_GAP_MS))
+      }
+      if (sequence === gestureSequenceRef.current) onGestureActionRef.current?.(gesture)
+    })()
   }
 
   const stop = () => {
@@ -258,9 +320,10 @@ export default function WebcamPanel({
 
     emaRef.current = null
     lagRef.current = null
-    lagStateRef.current = { lag: 0 }
-    smootherRef.current.reset()
+    lagStatesRef.current = [{ lag: 0 }, { lag: 0 }]
+    movementHistoryRef.current = [[], []]
     playerSmoothersRef.current.forEach((smoother) => smoother.reset())
+    playerWorldSmoothersRef.current.forEach((smoother) => smoother.reset())
     readyHoldRef.current = [0, 0]
     lobbyReadyRef.current = false
     gestureHoldRef.current = { candidate: null, since: 0, latched: false }
@@ -277,9 +340,10 @@ export default function WebcamPanel({
 
   useEffect(() => {
     if (!running) return
+    lastInferenceAtRef.current = 0
     let handle = 0
     let fallbackFrames = 0
-    let lastMetricsAt = 0
+    let lastMetricsAt = performance.now()
     const meter = new FrameMeter()
 
     const loop = (frameNow: number, metadata?: VideoFrameCallbackMetadata) => {
@@ -291,11 +355,20 @@ export default function WebcamPanel({
       const cv = canvasRef.current
       const lmk = landmarkerRef.current
       if (!v || !cv || !lmk || v.readyState < 2 || v.videoWidth === 0) return
+      if (frameNow - lastInferenceAtRef.current < LIVE_INFERENCE_INTERVAL_MS) return
+      lastInferenceAtRef.current = frameNow
 
       const presentedFrames = metadata?.presentedFrames ?? ++fallbackFrames
       meter.record(presentedFrames, frameNow)
       const timestampMs = frameTimestampMs(metadata?.mediaTime ?? Number.NaN, frameNow)
-      const res = lmk.detectForVideo(v, timestampMs)
+      const input = (inferenceCanvasRef.current ??= document.createElement('canvas'))
+      const inputHeight = Math.round(LIVE_INPUT_WIDTH * v.videoHeight / v.videoWidth)
+      if (input.width !== LIVE_INPUT_WIDTH || input.height !== inputHeight) {
+        input.width = LIVE_INPUT_WIDTH
+        input.height = inputHeight
+      }
+      input.getContext('2d')!.drawImage(v, 0, 0, input.width, input.height)
+      const res = lmk.detectForVideo(input, timestampMs)
       if (cv.width !== v.videoWidth || cv.height !== v.videoHeight) {
         cv.width = v.videoWidth
         cv.height = v.videoHeight
@@ -316,14 +389,29 @@ export default function WebcamPanel({
         playerXRef.current = detected.map((player) => player.x)
       }
       const count = detected.length
+      const registeredPlayerCount = registeredPlayerCountRef.current
+      const scoreSlots = detected.map((player, index) => {
+        if (registeredPlayerCount !== 2 || detected.length === 2 || playerXRef.current.length !== 2) return index
+        return Math.abs(player.x - playerXRef.current[0]) <= Math.abs(player.x - playerXRef.current[1]) ? 0 : 1
+      })
+      const players = detected.map((player, index) => {
+        const slot = scoreSlots[index] ?? index
+        return {
+          ...player,
+          pose: playerSmoothersRef.current[slot].filter(player.pose, timestampMs / 1000),
+          world: player.world
+            ? playerWorldSmoothersRef.current[slot].filter(player.world, timestampMs / 1000)
+            : undefined,
+        }
+      })
       if (stableCountRef.current.count !== count) {
         stableCountRef.current = { count, since: frameNow }
         readyHoldRef.current = [0, 0]
       }
 
       const setup: PlayerSetup = { count, progress: [], inZone: [], tPose: [] }
-      const poses = detected.map((player, index) => {
-        const pose = playerSmoothersRef.current[index].filter(player.pose, timestampMs / 1000)
+      const poses = players.map((player, index) => {
+        const pose = player.pose
         const inZone = inPlayerZone(player.x!, index, count)
         const tPose = isTPose(pose)
         if (!lobbyReadyRef.current && inZone && tPose) readyHoldRef.current[index] ||= frameNow
@@ -348,11 +436,8 @@ export default function WebcamPanel({
         setLobbyReady(true)
       }
 
-      const raw = poses[0]
-      const world = detected[0]?.world
-      // Steady the landmarks before anything reads them, so a body holding
-      // still produces a still skeleton and a steady score.
-      const pose = raw ? smootherRef.current.filter(raw, timestampMs / 1000) : undefined
+      const pose = poses[0]
+      const world = players[0]?.world
       let gestureReading = {
         ...gestureHoldRef.current,
         progress: gestureHoldRef.current.latched ? 1 : 0,
@@ -365,16 +450,12 @@ export default function WebcamPanel({
           frameNow,
         )
         gestureHoldRef.current = gestureReading
-        if (gestureReading.fired) onGestureActionRef.current?.(gestureReading.fired)
+        if (gestureReading.fired) runGestureConfirmation(gestureReading.fired)
       }
       const target = targetRef.current
       let frameScore: number | null = null
-      const registeredPlayerCount = registeredPlayerCountRef.current
       const frameScores: (number | null)[] = Array.from({ length: registeredPlayerCount }, () => null)
-      const scoreSlots = detected.map((player, index) => {
-        if (registeredPlayerCount !== 2 || detected.length === 2 || playerXRef.current.length !== 2) return index
-        return Math.abs(player.x - playerXRef.current[0]) <= Math.abs(player.x - playerXRef.current[1]) ? 0 : 1
-      })
+      const playerFeatures: (PoseFeature | null)[] = Array.from({ length: registeredPlayerCount }, () => null)
       let frameProblems: string[] = []
       let frameLag: number | null = null
       if (pose && world && lobbyReadyRef.current) {
@@ -392,7 +473,7 @@ export default function WebcamPanel({
           target.history,
           target.time,
           mirrored,
-          lagStateRef.current,
+          lagStatesRef.current[scoreSlots[0] ?? 0],
           focusRef.current,
           trackHeadRef.current,
         )
@@ -405,34 +486,99 @@ export default function WebcamPanel({
         })
         frameScore = cmp.score
         frameScores[scoreSlots[0] ?? 0] = cmp.score
+        playerFeatures[scoreSlots[0] ?? 0] = user
         frameProblems = cmp.problems
         frameLag = cmp.lag
       }
-      if (lobbyReadyRef.current && poses[1] && detected[1]?.world) {
-        const second = computeAngles(detected[1].world)
+      if (lobbyReadyRef.current && poses[1] && players[1]?.world) {
+        const second = computeAngles(players[1].world)
         const mirrored =
           mirrorModeRef.current === 'auto'
             ? target.facing !== 'back'
             : mirrorModeRef.current === 'mirror'
-        frameScores[scoreSlots[1] ?? 1] = compareToHistory(
+        const slot = scoreSlots[1] ?? 1
+        const cmp = compareToHistory(
           second,
           target.history,
           target.time,
           mirrored,
-          { lag: lagStateRef.current.lag },
+          lagStatesRef.current[slot],
           focusRef.current,
           trackHeadRef.current,
-        ).score
+        )
+        frameScores[slot] = cmp.score
+        playerFeatures[slot] = second
+        drawSkeleton(ctx, poses[1], cv.width, cv.height, {
+          color: LEVEL_COLORS.na,
+          lineWidth: 7,
+          connectionColors: target.feature ? levelConnectionColors(cmp.levels, LEVEL_COLORS) : undefined,
+          headColor: target.feature ? LEVEL_COLORS[cmp.levels[HEAD] ?? 'na'] : undefined,
+          dimmed: dimmedSegments(focusRef.current),
+        })
       }
 
-      if (gamePhase === 'playing' && target.hitTargets?.length) {
+      if (gamePhase === 'playing' && isGameRunReady(target.gameRun, gameRun) && target.hitTargets?.length) {
+        const cameraTime = frameNow / 1000
+        for (let index = 0; index < registeredPlayerCount; index++) {
+          const feature = playerFeatures[index]
+          if (!feature) continue
+          const history = movementHistoryRef.current[index]
+          history.push({ t: cameraTime, value: feature })
+          while (history.length > 1 && history[0].t < cameraTime - 1) history.shift()
+        }
         let changed = false
+        let hitGrade: Exclude<HitGrade, 'miss'> | null = null
+        let hitTarget: HitTarget | null = null
+        const scoreDebug: ScoreDebug[] = []
         for (let index = 0; index < registeredPlayerCount; index++) {
           const before = roundsRef.current[index]
-          const after = judgeDueTargets(before, frameScores[index] ?? null, target.time, target.hitTargets)
+          const feature = playerFeatures[index]
+          const mirrored = mirrorModeRef.current === 'auto'
+            ? target.facing !== 'back'
+            : mirrorModeRef.current === 'mirror'
+          const after = judgeDueTargets(
+            before,
+            (hitTarget) => {
+              const previous = movementBaseline(movementHistoryRef.current[index], cameraTime)
+              const movement = feature && previous
+                ? hitMovementDegrees(previous, feature, hitTarget.joint, mirrored)
+                : null
+              const match = feature && movement !== null && movement >= MIN_HIT_MOVEMENT_DEG
+                ? compareHitAngles(
+                  feature,
+                  hitTarget.feature,
+                  hitTarget.joint,
+                  mirrored,
+                  trackHeadRef.current,
+                ).score
+                : null
+              scoreDebug.push({
+                player: index + 1,
+                joint: hitTarget.joint,
+                movement,
+                match,
+                lag: lagStatesRef.current[index].lag,
+                grade: gradeMatch(match),
+              })
+              return match
+            },
+            target.time,
+            target.hitTargets,
+          )
           roundsRef.current[index] = after
-          if (after !== before) changed = true
+          if (after !== before) {
+            changed = true
+            if (after.perfect > before.perfect) {
+              hitGrade = 'perfect'
+              hitTarget = target.hitTargets[before.nextTarget]
+            } else if (after.good > before.good && hitGrade !== 'perfect') {
+              hitGrade = 'good'
+              hitTarget = target.hitTargets[before.nextTarget]
+            }
+          }
         }
+        if (hitGrade && hitTarget) onHit?.(hitGrade, hitTarget)
+        if (scoreDebug.length) onScoreDebug?.(scoreDebug)
         if (changed) onGameScores?.(roundsRef.current.slice(0, registeredPlayerCount))
       }
       if (!lobbyReadyRef.current) {
@@ -442,11 +588,6 @@ export default function WebcamPanel({
             lineWidth: 7,
           })
         }
-      } else if (poses[1]) {
-        drawSkeleton(ctx, poses[1], cv.width, cv.height, {
-          color: '#43e8ff',
-          lineWidth: 7,
-        })
       }
 
       // Charge elapsed time to the phrase that was playing, but only while a
@@ -513,7 +654,7 @@ export default function WebcamPanel({
       if (v && 'cancelVideoFrameCallback' in v) v.cancelVideoFrameCallback(handle)
       else cancelAnimationFrame(handle)
     }
-  }, [running, targetRef, gamePhase, onGameScores, onLobbyChange])
+  }, [running, targetRef, gamePhase, gameRun, onGameScores, onHit, onLobbyChange, onScoreDebug])
 
   return (
     <section className="panel">
@@ -528,8 +669,8 @@ export default function WebcamPanel({
         <video ref={videoRef} playsInline muted />
         <canvas
           ref={canvasRef}
-          className={showSkeletons ? undefined : 'skeleton-hidden'}
-          aria-hidden={!showSkeletons}
+          className={gameplaySkeletonsVisible ? undefined : 'skeleton-hidden'}
+          aria-hidden={!gameplaySkeletonsVisible}
         />
         {running && !lobbyReady && (
           <div className={`player-lobby ${playerSetup.count === 1 ? 'solo' : ''}`} aria-live="polite">
@@ -584,10 +725,14 @@ export default function WebcamPanel({
             )}
           </div>
         )}
-        {running && lobbyReady && gestureContext && gestureFeedback.gesture && !checking && (
-          <div className="gesture-command" aria-live="polite">
-            <strong>{gestureLabel(gestureFeedback.gesture, gestureContext)}</strong>
-            <span>{gestureFeedback.progress >= 1 ? 'Return to neutral' : 'Hold steady'}</span>
+        {running && lobbyReady && gestureContext && !checking && (
+          <div className={`gesture-command${gestureFeedback.gesture ? '' : ' is-idle'}`} aria-live="polite">
+            <strong>{gestureFeedback.gesture ? gestureLabel(gestureFeedback.gesture, gestureContext) : 'Gesture controls ready'}</strong>
+            <span>
+              {gestureFeedback.gesture
+                ? gestureFeedback.progress >= 1 ? 'Return to neutral' : 'Hold steady'
+                : gestureContext === 'results' ? 'Right hand: replay · cross arms: songs' : 'Make a navigation gesture'}
+            </span>
             <i style={{ transform: `scaleX(${gestureFeedback.progress})` }} />
           </div>
         )}

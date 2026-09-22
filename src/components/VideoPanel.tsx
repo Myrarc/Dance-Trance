@@ -31,11 +31,12 @@ import {
   HIT_LEAD_S,
   HIT_COLORS,
   drawHitRail,
+  drawArcadeHitLabel,
   drawArcadeHitMarker,
 } from '../pose/arcade'
 import SectionList from './SectionList'
 import { activeSection, newSectionId, type Section, type SectionStat } from '../lib/library'
-import type { GamePhase } from '../pose/gameplay'
+import type { GamePhase, HitGrade } from '../pose/gameplay'
 
 export interface TargetPose {
   feature: PoseFeature | null
@@ -45,6 +46,8 @@ export interface TargetPose {
   history: TargetFrame[]
   /** Current video time in seconds. */
   time: number
+  /** Run whose reference video has finished rewinding and started playback. */
+  gameRun: number
   /** Which way the reference dancer is facing, or null when side-on. */
   facing: Facing | null
   /** Hit targets from the analysed track, for rendering cues. */
@@ -73,6 +76,7 @@ interface Props {
   countdown?: number
   gameRun?: number
   onGameEnd?: () => void
+  hitFeedback?: { id: number; grade: Exclude<HitGrade, 'miss'>; target: HitTarget } | null
 }
 
 
@@ -158,6 +162,7 @@ export default function VideoPanel({
   countdown = 3,
   gameRun = 0,
   onGameEnd,
+  hitFeedback,
 }: Props) {
   const trackRef = useRef<PoseTrack | null>(null)
   trackRef.current = track ?? null
@@ -167,6 +172,8 @@ export default function VideoPanel({
   )
   const hitTargetsRef = useRef(hitTargets)
   hitTargetsRef.current = hitTargets
+  const hitFeedbackRef = useRef(hitFeedback)
+  hitFeedbackRef.current = hitFeedback
   const trackHeadRef = useRef(trackHead)
   trackHeadRef.current = trackHead
   const reduceMotionRef = useRef(false)
@@ -243,18 +250,38 @@ export default function VideoPanel({
   useEffect(() => {
     const video = videoRef.current
     if (!video) return
+    const target = targetRef.current
+    const resetTargetClock = () => {
+      target.gameRun = 0
+      target.time = 0
+      target.history = []
+    }
     if (gamePhase === 'countdown') {
       video.pause()
       video.currentTime = 0
+      resetTargetClock()
       setLoopA(null)
       setLoopB(null)
     } else if (gamePhase === 'playing') {
+      resetTargetClock()
       video.currentTime = 0
-      void video.play()
+      let cancelled = false
+      const play = () => {
+        void video.play().then(() => {
+          if (!cancelled) targetRef.current.gameRun = gameRun
+        })
+      }
+      if (video.seeking) video.addEventListener('seeked', play, { once: true })
+      else play()
+      return () => {
+        cancelled = true
+        video.removeEventListener('seeked', play)
+      }
     } else if (gamePhase === 'results') {
       video.pause()
+      target.gameRun = 0
     }
-  }, [gamePhase, gameRun])
+  }, [gamePhase, gameRun, targetRef])
 
   useEffect(() => {
     const query = window.matchMedia('(prefers-reduced-motion: reduce)')
@@ -353,6 +380,7 @@ export default function VideoPanel({
     targetRef.current.feature = null
     targetRef.current.history = []
     targetRef.current.facing = null
+    targetRef.current.gameRun = 0
   }, [src, targetRef])
 
   useEffect(() => {
@@ -561,6 +589,13 @@ export default function VideoPanel({
         HIT_LEAD_S,
         trackHeadRef.current,
       )
+      const feedback = hitFeedbackRef.current
+      if (
+        feedback
+        && v.currentTime >= feedback.target.time
+        && v.currentTime - feedback.target.time <= 0.45
+        && !upcoming.includes(feedback.target)
+      ) upcoming.push(feedback.target)
       const points = upcoming.map((target) => ({
         target,
         x: (mirrorRef.current ? 1 - target.x : target.x) * vw,
@@ -586,6 +621,9 @@ export default function VideoPanel({
           remaining,
           reduceMotionRef.current,
         )
+        if (feedback?.target === target && remaining <= 0 && remaining >= -0.45) {
+          drawArcadeHitLabel(hitCtx, x, y, markerRadius, feedback.grade)
+        }
       }
     }
 
@@ -809,8 +847,8 @@ export default function VideoPanel({
             (hitTargets.length === 0
               ? T('No hit markers found in the analysed poses')
               : analysisMetrics
-                ? `${hitTargets.length} ${T('hit markers ready')} · ${analysisMetrics.method} · ${(analysisMetrics.totalMs / 1000).toFixed(1)}s`
-                : `${hitTargets.length} ${T('hit markers ready')} · ${T('800 ms preview')}`)}
+                ? `${hitTargets.length} ${T('hit markers ready')} · ${track.bpm ? `${Math.round(track.bpm)} BPM · ` : ''}${analysisMetrics.method} · ${(analysisMetrics.totalMs / 1000).toFixed(1)}s`
+                : `${hitTargets.length} ${T('hit markers ready')} · ${track.bpm ? `${Math.round(track.bpm)} BPM · ` : ''}${T('800 ms preview')}`)}
           {modelState === 'ready' && analysing == null && !analysisMessage && !track && locked && T('Following one dancer · click another to switch')}
           {modelState === 'ready' && analysing == null && !analysisMessage && !track && !locked && personCount > 1 && T('Multiple dancers · click the one to follow')}
           {modelState === 'ready' && analysing == null && !analysisMessage && !track && !locked && personCount <= 1 && T('Click a dancer to lock on')}
@@ -849,7 +887,7 @@ export default function VideoPanel({
         <canvas ref={hitCanvasRef} className="hit-canvas" aria-hidden="true" />
         </div>
         {gamePhase === 'countdown' && (
-          <div className="game-countdown" aria-live="assertive">{countdown}</div>
+          <div key={countdown} className="game-countdown" aria-live="assertive">{countdown}</div>
         )}
       </div>
 
