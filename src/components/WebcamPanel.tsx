@@ -8,9 +8,18 @@ import { LandmarkSmoother } from '../pose/filter'
 import { framingProblems } from '../pose/checkup'
 import { FrameMeter, frameTimestampMs, type FrameMetrics } from '../pose/frameMeter'
 import Checkup from './Checkup'
+import { inPlayerZone, isTPose, playerScreenX } from '../pose/gestures'
 
 /** Whether to mirror the comparison; 'auto' follows the reference's facing. */
 type MirrorMode = 'auto' | 'mirror' | 'direct'
+const READY_HOLD_MS = 1200
+
+interface PlayerSetup {
+  count: number
+  progress: number[]
+  inZone: boolean[]
+  tPose: boolean[]
+}
 import type { TargetPose } from './VideoPanel'
 import { recordSession } from '../playkitClient'
 
@@ -59,6 +68,10 @@ export default function WebcamPanel({
   // The lag estimate persists between frames so it can settle.
   const lagStateRef = useRef<LagState>({ lag: 0 })
   const smootherRef = useRef(new LandmarkSmoother())
+  const playerSmoothersRef = useRef([new LandmarkSmoother(), new LandmarkSmoother()])
+  const readyHoldRef = useRef([0, 0])
+  const stableCountRef = useRef({ count: 0, since: 0 })
+  const lobbyReadyRef = useRef(false)
   // Latest reading, so the guided check can sample without its own detector.
   const latestRef = useRef<{ feature: PoseFeature; framing: string[] } | null>(null)
   const lastUiRef = useRef(0)
@@ -80,6 +93,13 @@ export default function WebcamPanel({
   const [checking, setChecking] = useState(false)
   const [capture, setCapture] = useState({ width: 0, height: 0, fps: 0 })
   const [metrics, setMetrics] = useState<FrameMetrics | null>(null)
+  const [playerSetup, setPlayerSetup] = useState<PlayerSetup>({
+    count: 0,
+    progress: [],
+    inZone: [],
+    tPose: [],
+  })
+  const [lobbyReady, setLobbyReady] = useState(false)
 
   mirrorModeRef.current = mirrorMode
 
@@ -111,7 +131,7 @@ export default function WebcamPanel({
     setStarting(true)
     setError(null)
     try {
-      landmarkerRef.current ??= await createPoseLandmarker(1, 'full')
+      landmarkerRef.current ??= await createPoseLandmarker(2, 'full')
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           width: { ideal: 1280 },
@@ -132,6 +152,10 @@ export default function WebcamPanel({
       v.srcObject = stream
       await v.play()
       sessionRef.current = { startedAt: performance.now(), sum: 0, count: 0, best: 0 }
+      readyHoldRef.current = [0, 0]
+      stableCountRef.current = { count: 0, since: performance.now() }
+      lobbyReadyRef.current = false
+      setLobbyReady(false)
       setRunning(true)
     } catch (e) {
       console.error('webcam start failed', e)
@@ -174,7 +198,12 @@ export default function WebcamPanel({
     lagRef.current = null
     lagStateRef.current = { lag: 0 }
     smootherRef.current.reset()
+    playerSmoothersRef.current.forEach((smoother) => smoother.reset())
+    readyHoldRef.current = [0, 0]
+    lobbyReadyRef.current = false
     setRunning(false)
+    setLobbyReady(false)
+    setPlayerSetup({ count: 0, progress: [], inZone: [], tPose: [] })
     setScore(null)
     setLag(null)
     setProblems([])
@@ -211,8 +240,46 @@ export default function WebcamPanel({
       const ctx = cv.getContext('2d')!
       ctx.clearRect(0, 0, cv.width, cv.height)
 
-      const raw = res.landmarks[0]
-      const world = res.worldLandmarks[0]
+      const detected = res.landmarks
+        .map((pose, index) => ({ pose, world: res.worldLandmarks[index], x: playerScreenX(pose) }))
+        .filter((player) => player.x !== null)
+        .sort((a, b) => a.x! - b.x!)
+        .slice(0, 2)
+      const count = detected.length
+      if (stableCountRef.current.count !== count) {
+        stableCountRef.current = { count, since: frameNow }
+        readyHoldRef.current = [0, 0]
+      }
+
+      const setup: PlayerSetup = { count, progress: [], inZone: [], tPose: [] }
+      const poses = detected.map((player, index) => {
+        const pose = playerSmoothersRef.current[index].filter(player.pose, timestampMs / 1000)
+        const inZone = inPlayerZone(player.x!, index, count)
+        const tPose = isTPose(pose)
+        if (!lobbyReadyRef.current && inZone && tPose) readyHoldRef.current[index] ||= frameNow
+        else if (!lobbyReadyRef.current) readyHoldRef.current[index] = 0
+        setup.inZone.push(inZone)
+        setup.tPose.push(tPose)
+        setup.progress.push(
+          readyHoldRef.current[index]
+            ? Math.min(1, (frameNow - readyHoldRef.current[index]) / READY_HOLD_MS)
+            : 0,
+        )
+        return pose
+      })
+
+      if (
+        !lobbyReadyRef.current &&
+        count > 0 &&
+        frameNow - stableCountRef.current.since > 500 &&
+        setup.progress.every((progress) => progress >= 1)
+      ) {
+        lobbyReadyRef.current = true
+        setLobbyReady(true)
+      }
+
+      const raw = poses[0]
+      const world = detected[0]?.world
       // Steady the landmarks before anything reads them, so a body holding
       // still produces a still skeleton and a steady score.
       const pose = raw ? smootherRef.current.filter(raw, timestampMs / 1000) : undefined
@@ -220,7 +287,7 @@ export default function WebcamPanel({
       let frameScore: number | null = null
       let frameProblems: string[] = []
       let frameLag: number | null = null
-      if (pose && world) {
+      if (pose && world && lobbyReadyRef.current) {
         const user = computeAngles(world)
         const framingNow = framingProblems(pose, focusRef.current)
         latestRef.current = { feature: user, framing: framingNow }
@@ -241,6 +308,19 @@ export default function WebcamPanel({
         frameScore = cmp.score
         frameProblems = cmp.problems
         frameLag = cmp.lag
+      }
+      if (!lobbyReadyRef.current) {
+        for (const playerPose of poses) {
+          drawSkeleton(ctx, playerPose, cv.width, cv.height, {
+            color: LEVEL_COLORS.na,
+            lineWidth: 7,
+          })
+        }
+      } else if (poses[1]) {
+        drawSkeleton(ctx, poses[1], cv.width, cv.height, {
+          color: '#43e8ff',
+          lineWidth: 7,
+        })
       }
 
       // Charge elapsed time to the phrase that was playing, but only while a
@@ -291,6 +371,7 @@ export default function WebcamPanel({
             ? targetRef.current.facing !== 'back'
             : mirrorModeRef.current === 'mirror',
         )
+        if (!lobbyReadyRef.current) setPlayerSetup(setup)
       }
       if (frameNow - lastMetricsAt >= 1000) {
         lastMetricsAt = frameNow
@@ -310,7 +391,9 @@ export default function WebcamPanel({
     <section className="panel">
       <div className="panel-head">
         <h2>{T('You')}</h2>
-        <span className="hint">{T(running ? 'Comparing live' : 'Turn on your camera to follow along')}</span>
+        <span className="hint">
+          {T(!running ? 'Turn on your camera to follow along' : lobbyReady ? `${playerSetup.count || 1} player${playerSetup.count === 1 ? '' : 's'} ready` : 'Player check')}
+        </span>
       </div>
 
       <div className="stage mirrored webcam-stage">
@@ -320,6 +403,28 @@ export default function WebcamPanel({
           className={showSkeletons ? undefined : 'skeleton-hidden'}
           aria-hidden={!showSkeletons}
         />
+        {running && !lobbyReady && (
+          <div className={`player-lobby ${playerSetup.count === 1 ? 'solo' : ''}`} aria-live="polite">
+            {(playerSetup.count === 1 ? [0] : [0, 1]).map((index) => {
+              const detected = index < playerSetup.count
+              const progress = playerSetup.progress[index] ?? 0
+              const instruction = !detected
+                ? 'Step into this area'
+                : !playerSetup.inZone[index]
+                  ? 'Move inside the area'
+                  : !playerSetup.tPose[index]
+                    ? 'Hold a T-pose'
+                    : `${Math.round(progress * 100)}%`
+              return (
+                <div key={index} className={`player-zone ${progress >= 1 ? 'ready' : ''}`}>
+                  <strong>{playerSetup.count === 1 ? 'PLAYER' : `PLAYER ${index + 1}`}</strong>
+                  <span>{instruction}</span>
+                  <i style={{ transform: `scaleX(${progress})` }} />
+                </div>
+              )
+            })}
+          </div>
+        )}
         {!running && (
           <div className="stage-overlay">
             <button className="btn primary" onClick={start} disabled={starting}>
@@ -328,7 +433,7 @@ export default function WebcamPanel({
             {error && <p className="error">{error}</p>}
           </div>
         )}
-        {running && framing.length > 0 && !checking && (
+        {running && lobbyReady && framing.length > 0 && !checking && (
           <div className="framing-warning">
             {framing.map((f) => (
               <p key={f}>{T(f)}</p>
@@ -340,7 +445,7 @@ export default function WebcamPanel({
             <Checkup read={() => latestRef.current} onClose={() => setChecking(false)} />
           </div>
         )}
-        {running && !checking && (
+        {running && lobbyReady && !checking && (
           <div className="score-badge">
             <span className="score-num">{score ?? '—'}</span>
             <span className="score-label">match</span>

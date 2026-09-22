@@ -151,9 +151,17 @@ header .sub {
   opacity: 0;
 }
 
+.stage canvas.hit-canvas {
+  pointer-events: none;
+}
+
 .stage.mirrored video,
 .stage.mirrored canvas {
   transform: scaleX(-1);
+}
+
+.stage.mirrored canvas.hit-canvas {
+  transform: none;
 }
 
 .stage-overlay {
@@ -165,6 +173,61 @@ header .sub {
   justify-content: center;
   gap: 12px;
   background: rgba(11, 11, 15, 0.7);
+}
+
+.player-lobby {
+  position: absolute;
+  inset: 8% 4%;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10%;
+  pointer-events: none;
+}
+
+.player-lobby.solo {
+  grid-template-columns: minmax(220px, 50%);
+  justify-content: center;
+}
+
+.player-zone {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  padding: 18px;
+  overflow: hidden;
+  border: 2px dashed rgba(244, 244, 247, 0.5);
+  border-radius: 16px;
+  color: var(--text);
+  background: rgba(11, 11, 15, 0.12);
+  text-shadow: 0 1px 8px #000;
+}
+
+.player-zone.ready {
+  border-color: var(--ok);
+}
+
+.player-zone strong {
+  font-size: 13px;
+  letter-spacing: 0.06em;
+}
+
+.player-zone span {
+  min-height: 17px;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.player-zone i {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 5px;
+  background: var(--ok);
+  transform-origin: left;
 }
 
 .tracking-diagnostics {

@@ -6,7 +6,13 @@ import Library from './components/Library'
 import { T, L, useLangTick, LangGlobe } from './i18n'
 import { LEVEL_COLORS, SIDE_COLORS } from './pose/skeleton'
 import type { Focus } from './pose/angles'
-import { analyseVideo, packTrack, unpackTrack, type PoseTrack } from './pose/track'
+import {
+  analyseVideo,
+  packTrack,
+  unpackTrack,
+  type AnalysisMetrics,
+  type PoseTrack,
+} from './pose/track'
 import {
   addSectionPractice,
   forget,
@@ -41,6 +47,8 @@ export default function App() {
   const [focus, setFocus] = useState<Focus>('full')
   const [track, setTrack] = useState<PoseTrack | null>(null)
   const [analysing, setAnalysing] = useState<number | null>(null)
+  const [analysisMetrics, setAnalysisMetrics] = useState<AnalysisMetrics | null>(null)
+  const [analysisMessage, setAnalysisMessage] = useState<string | null>(null)
   const [showSkeletons, setShowSkeletons] = useState(loadSkeletonsVisible)
   const targetRef = useRef<TargetPose>({
     feature: null,
@@ -99,30 +107,48 @@ export default function App() {
   useEffect(() => {
     let cancelled = false
     setTrack(null)
+    setAnalysisMetrics(null)
+    setAnalysisMessage(null)
     if (!currentId) return
     void getTrack(currentId).then((stored) => {
-      if (!cancelled && stored) setTrack(unpackTrack(stored))
+      const decoded = stored ? unpackTrack(stored) : null
+      if (!cancelled && decoded) setTrack(decoded)
     })
     return () => {
       cancelled = true
     }
   }, [currentId])
 
-  const analyse = async () => {
-    if (!current || analysing != null) return
-    const blob = await getVideo(current.id)
-    if (!blob) return
+  const analyseBlob = async (entry: LibraryEntry, blob: Blob) => {
+    if (analysing != null) return
     setAnalysing(0)
+    setAnalysisMetrics(null)
+    setAnalysisMessage(null)
     try {
-      const result = await analyseVideo(blob, (f) => setAnalysing(f))
+      const result = await analyseVideo(
+        blob,
+        (f) => setAnalysing(f),
+        () => false,
+        setAnalysisMetrics,
+        (reason) => setAnalysisMessage(`Fast analysis unavailable (${reason}); using compatibility mode`),
+      )
       if (result) {
-        await saveTrack(current.id, packTrack(result))
+        await saveTrack(entry.id, packTrack(result))
         setTrack(result)
+        setAnalysisMessage(null)
         await refresh()
       }
+    } catch (error) {
+      setAnalysisMessage(`Analysis failed: ${error instanceof Error ? error.message : String(error)}`)
     } finally {
       setAnalysing(null)
     }
+  }
+
+  const analyse = async () => {
+    if (!current || analysing != null) return
+    const blob = await getVideo(current.id)
+    if (blob) await analyseBlob(current, blob)
   }
 
   const play = (blob: Blob) => {
@@ -147,6 +173,10 @@ export default function App() {
       void syncLibrary([
         { id: entry.id, name: entry.name, duration: entry.duration, lastOpenedAt: entry.lastOpenedAt },
       ])
+      const stored = await getTrack(entry.id)
+      const decoded = stored ? unpackTrack(stored) : null
+      if (decoded) setTrack(decoded)
+      else await analyseBlob(entry, file)
     }
   }
 
@@ -163,6 +193,10 @@ export default function App() {
     setLibraryOpen(false)
     await touch(entry.id)
     await refresh()
+    const stored = await getTrack(entry.id)
+    const decoded = stored ? unpackTrack(stored) : null
+    if (decoded) setTrack(decoded)
+    else await analyseBlob(entry, blob)
   }
 
   /** Sections belong to the dance, so they live with it in the library. */
@@ -264,6 +298,8 @@ export default function App() {
             track={track}
             onAnalyse={() => void analyse()}
             analysing={analysing}
+            analysisMetrics={analysisMetrics}
+            analysisMessage={analysisMessage}
             showSkeletons={showSkeletons}
           />
         ) : (

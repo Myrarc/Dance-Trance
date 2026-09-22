@@ -1,5 +1,5 @@
 import { T } from '../i18n'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { HandLandmarker, NormalizedLandmark, PoseLandmarker } from '@mediapipe/tasks-vision'
 import { createHandLandmarker, createPoseLandmarker } from '../pose/landmarker'
 import {
@@ -21,7 +21,8 @@ import {
 import { computeAngles, dimmedSegments, type Focus, type Landmark3, type PoseFeature, type TargetFrame } from '../pose/angles'
 import { facing, type Facing } from '../pose/skeleton'
 import { LandmarkSmoother } from '../pose/filter'
-import { sampleTrack, type PoseTrack } from '../pose/track'
+import { sampleTrack, type AnalysisMetrics, type PoseTrack } from '../pose/track'
+import { buildHitTargets, upcomingHitTargets, type HitJoint } from '../pose/hitTargets'
 import SectionList from './SectionList'
 import { activeSection, newSectionId, type Section, type SectionStat } from '../lib/library'
 
@@ -39,6 +40,120 @@ export interface TargetPose {
 
 /** Video seconds of lag the comparison will forgive. */
 const LAG_WINDOW_S = 1
+const HIT_LEAD_S = 0.8
+
+const HIT_COLORS: Record<HitJoint, string> = {
+  head: '#7df4ff',
+  leftHand: SIDE_COLORS.left,
+  rightHand: SIDE_COLORS.right,
+  leftFoot: SIDE_COLORS.left,
+  rightFoot: SIDE_COLORS.right,
+}
+
+function drawHitRail(
+  ctx: CanvasRenderingContext2D,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  color: string,
+  width: number,
+) {
+  const dx = to.x - from.x
+  const dy = to.y - from.y
+  const length = Math.hypot(dx, dy)
+  if (length < 1) return
+  const ox = (-dy / length) * width * 0.9
+  const oy = (dx / length) * width * 0.9
+
+  ctx.save()
+  ctx.globalCompositeOperation = 'lighter'
+  ctx.strokeStyle = color
+  ctx.lineWidth = Math.max(1.5, width * 0.36)
+  ctx.globalAlpha = 0.55
+  ctx.shadowColor = color
+  ctx.shadowBlur = width * 1.5
+  for (const side of [-1, 1]) {
+    ctx.beginPath()
+    ctx.moveTo(from.x + ox * side, from.y + oy * side)
+    ctx.lineTo(to.x + ox * side, to.y + oy * side)
+    ctx.stroke()
+  }
+  ctx.restore()
+}
+
+function drawArcadeHitMarker(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  radius: number,
+  color: string,
+  remaining: number,
+  reduceMotion: boolean,
+) {
+  const countdown = Math.max(0, Math.min(1, remaining / HIT_LEAD_S))
+  const impact = remaining <= 0 ? Math.max(0, 1 + remaining / 0.12) : 0
+  const pulse = reduceMotion ? 1 : 1 + impact * 0.28
+  const r = radius * pulse
+  const line = Math.max(2, radius * 0.075)
+
+  ctx.save()
+  ctx.globalCompositeOperation = 'lighter'
+
+  const halo = ctx.createRadialGradient(x, y, radius * 0.12, x, y, r * 1.5)
+  halo.addColorStop(0, `${color}55`)
+  halo.addColorStop(0.5, `${color}20`)
+  halo.addColorStop(1, `${color}00`)
+  ctx.fillStyle = halo
+  ctx.beginPath()
+  ctx.arc(x, y, r * 1.5, 0, Math.PI * 2)
+  ctx.fill()
+
+  ctx.strokeStyle = color
+  ctx.shadowColor = color
+  ctx.shadowBlur = radius * 0.28
+  for (const [scale, alpha] of [[0.58, 0.9], [0.78, 0.7], [1, 0.95]] as const) {
+    ctx.globalAlpha = alpha
+    ctx.lineWidth = scale === 1 ? line * 1.25 : line * 0.65
+    ctx.beginPath()
+    ctx.arc(x, y, r * scale, 0, Math.PI * 2)
+    ctx.stroke()
+  }
+
+  // The warm outer sweep is the clock: it contracts towards the hit point.
+  ctx.globalAlpha = 1
+  ctx.strokeStyle = '#fff2a8'
+  ctx.shadowColor = '#fff2a8'
+  ctx.shadowBlur = radius * 0.22
+  ctx.lineCap = 'round'
+  ctx.lineWidth = line * 1.5
+  ctx.beginPath()
+  ctx.arc(x, y, r * 1.22, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * countdown)
+  ctx.stroke()
+
+  // Four small breaks keep the marker reading as a game reticle, not a chart.
+  ctx.shadowBlur = 0
+  ctx.strokeStyle = '#ffffff'
+  ctx.lineWidth = line * 0.55
+  for (let i = 0; i < 4; i++) {
+    const angle = i * Math.PI / 2
+    const inner = r * 0.33
+    const outer = r * 0.44
+    ctx.beginPath()
+    ctx.moveTo(x + Math.cos(angle) * inner, y + Math.sin(angle) * inner)
+    ctx.lineTo(x + Math.cos(angle) * outer, y + Math.sin(angle) * outer)
+    ctx.stroke()
+  }
+
+  if (impact > 0) {
+    ctx.globalAlpha = impact
+    ctx.fillStyle = '#ffffff'
+    ctx.shadowColor = color
+    ctx.shadowBlur = radius * 0.7
+    ctx.beginPath()
+    ctx.arc(x, y, radius * (0.12 + impact * 0.12), 0, Math.PI * 2)
+    ctx.fill()
+  }
+  ctx.restore()
+}
 
 interface Props {
   src: string
@@ -51,6 +166,8 @@ interface Props {
   track?: PoseTrack | null
   onAnalyse?: () => void
   analysing?: number | null
+  analysisMetrics?: AnalysisMetrics | null
+  analysisMessage?: string | null
   showSkeletons: boolean
 }
 
@@ -129,16 +246,23 @@ export default function VideoPanel({
   track,
   onAnalyse,
   analysing,
+  analysisMetrics,
+  analysisMessage,
   showSkeletons,
 }: Props) {
   const trackRef = useRef<PoseTrack | null>(null)
   trackRef.current = track ?? null
+  const hitTargets = useMemo(() => (track ? buildHitTargets(track) : []), [track])
+  const hitTargetsRef = useRef(hitTargets)
+  hitTargetsRef.current = hitTargets
+  const reduceMotionRef = useRef(false)
   const focusRef = useRef<Focus>('full')
   focusRef.current = focus
   const sectionsRef = useRef<Section[]>([])
   sectionsRef.current = sections
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const hitCanvasRef = useRef<HTMLCanvasElement>(null)
   const stageRef = useRef<HTMLDivElement>(null)
   const stageInnerRef = useRef<HTMLDivElement>(null)
   const zoomModeRef = useRef<ZoomMode>('off')
@@ -196,6 +320,22 @@ export default function VideoPanel({
   zoomModeRef.current = zoomMode
   mirrorRef.current = mirror
 
+  useEffect(() => {
+    // A completed analysis can arrive while playback is paused at the same
+    // timestamp; force the new track and its hit markers to paint once.
+    lastTimeRef.current = -1
+  }, [track])
+
+  useEffect(() => {
+    const query = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const update = () => {
+      reduceMotionRef.current = query.matches
+    }
+    update()
+    query.addEventListener('change', update)
+    return () => query.removeEventListener('change', update)
+  }, [])
+
   /** Re-frame from scratch: the old region no longer describes the subject. */
   const resetFraming = () => {
     framedRef.current = null
@@ -206,6 +346,10 @@ export default function VideoPanel({
   }
 
   useEffect(() => {
+    if (track) {
+      setModelState('ready')
+      return
+    }
     let closed = false
     Promise.all([createPoseLandmarker(5), createPoseLandmarker(1)])
       .then(([full, crop]) => {
@@ -232,7 +376,7 @@ export default function VideoPanel({
       cropLmkRef.current = null
       handLmkRef.current = { left: null, right: null }
     }
-  }, [])
+  }, [track])
 
   // The hand model is a second inference pass per frame, so only load it when
   // the user actually turns fingers on.
@@ -289,9 +433,10 @@ export default function VideoPanel({
       raf = requestAnimationFrame(loop)
       const v = videoRef.current
       const cv = canvasRef.current
+      const hitCv = hitCanvasRef.current
       const fullLmk = fullLmkRef.current
       const cropLmk = cropLmkRef.current
-      if (!v || !cv || !fullLmk || !cropLmk || v.readyState < 2 || v.videoWidth === 0) return
+      if (!v || !cv || !hitCv || (!trackRef.current && (!fullLmk || !cropLmk)) || v.readyState < 2 || v.videoWidth === 0) return
       // Ease the zoom every frame, not just on frames that run detection —
       // otherwise it freezes mid-animation whenever the video is paused.
       applyZoom(lastPoseRef.current, v.videoWidth, v.videoHeight)
@@ -332,14 +477,20 @@ export default function VideoPanel({
         cv.width = vw
         cv.height = vh
       }
+      if (hitCv.width !== vw || hitCv.height !== vh) {
+        hitCv.width = vw
+        hitCv.height = vh
+      }
       const ctx = cv.getContext('2d')!
       ctx.clearRect(0, 0, vw, vh)
+      const hitCtx = hitCv.getContext('2d')!
+      hitCtx.clearRect(0, 0, vw, vh)
 
       // A click always re-picks. Prefer a pose the full-frame pass can see;
       // otherwise lock a default box on the click and let the crop pass find
       // the dancer there — that is the only way to follow someone the
       // whole-frame detector never reports.
-      if (click) {
+      if (click && fullLmk) {
         missRef.current = 0
         const full = fullLmk.detectForVideo(drawFrame(null), stamp()).landmarks
         const idx = pickPose(full, null, click)
@@ -373,7 +524,7 @@ export default function VideoPanel({
         selectedWorld = stored.world
       }
 
-      if (!stored && lockRef.current) {
+      if (!stored && lockRef.current && cropLmk) {
         const box = lockRef.current
         const res = cropLmk.detectForVideo(drawFrame(box), stamp())
         const local = res.landmarks[0]
@@ -395,7 +546,7 @@ export default function VideoPanel({
         }
       }
 
-      if (!stored && !lockRef.current) {
+      if (!stored && !lockRef.current && fullLmk) {
         const res = fullLmk.detectForVideo(drawFrame(null), stamp())
         const poses = res.landmarks
         const idx = pickPose(poses, selCenterRef.current, null)
@@ -471,6 +622,35 @@ export default function VideoPanel({
       }
       setLocked(box !== null)
       lastPoseRef.current = selected
+
+      const markerRadius = Math.max(28, vh * 0.052)
+      const upcoming = upcomingHitTargets(hitTargetsRef.current, v.currentTime, HIT_LEAD_S)
+      const points = upcoming.map((target) => ({
+        target,
+        x: (mirrorRef.current ? 1 - target.x : target.x) * vw,
+        y: target.y * vh,
+      }))
+
+      for (let i = 1; i < points.length; i++) {
+        const from = points[i - 1]
+        const to = points[i]
+        if (to.target.time - from.target.time <= 0.35) {
+          drawHitRail(hitCtx, from, to, HIT_COLORS[to.target.joint], Math.max(4, vh / 150))
+        }
+      }
+
+      for (const { target, x, y } of points) {
+        const remaining = target.time - v.currentTime
+        drawArcadeHitMarker(
+          hitCtx,
+          x,
+          y,
+          markerRadius,
+          HIT_COLORS[target.joint],
+          remaining,
+          reduceMotionRef.current,
+        )
+      }
     }
 
     /**
@@ -687,9 +867,17 @@ export default function VideoPanel({
         <span className="hint">
           {modelState === 'loading' && T('Loading pose model…')}
           {modelState === 'error' && T('Model failed to load — try reloading')}
-          {modelState === 'ready' && locked && T('Following one dancer · click another to switch')}
-          {modelState === 'ready' && !locked && personCount > 1 && T('Multiple dancers · click the one to follow')}
-          {modelState === 'ready' && !locked && personCount <= 1 && T('Click a dancer to lock on')}
+          {analysing != null && `${T('Analysing movement')} ${Math.round(analysing * 100)}%${analysisMessage ? ` · ${analysisMessage}` : ''}`}
+          {analysing == null && analysisMessage && analysisMessage}
+          {modelState === 'ready' && analysing == null && !analysisMessage && track &&
+            (hitTargets.length === 0
+              ? T('No hit markers found in the analysed poses')
+              : analysisMetrics
+                ? `${hitTargets.length} ${T('hit markers ready')} · ${analysisMetrics.method} · ${(analysisMetrics.totalMs / 1000).toFixed(1)}s`
+                : `${hitTargets.length} ${T('hit markers ready')} · ${T('800 ms preview')}`)}
+          {modelState === 'ready' && analysing == null && !analysisMessage && !track && locked && T('Following one dancer · click another to switch')}
+          {modelState === 'ready' && analysing == null && !analysisMessage && !track && !locked && personCount > 1 && T('Multiple dancers · click the one to follow')}
+          {modelState === 'ready' && analysing == null && !analysisMessage && !track && !locked && personCount <= 1 && T('Click a dancer to lock on')}
         </span>
       </div>
 
@@ -721,6 +909,7 @@ export default function VideoPanel({
           aria-hidden={!showSkeletons}
           onClick={onCanvasClick}
         />
+        <canvas ref={hitCanvasRef} className="hit-canvas" aria-hidden="true" />
         </div>
       </div>
 

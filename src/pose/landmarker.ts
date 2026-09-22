@@ -1,16 +1,28 @@
 import { FilesetResolver, HandLandmarker, PoseLandmarker } from '@mediapipe/tasks-vision'
 
+export interface VisionFileset {
+  wasmLoaderPath: string
+  wasmBinaryPath: string
+}
+
 let visionPromise: ReturnType<typeof FilesetResolver.forVisionTasks> | null = null
 
 function getVision() {
-  visionPromise ??= FilesetResolver.forVisionTasks(import.meta.env.BASE_URL + 'wasm')
+  visionPromise ??= FilesetResolver.forVisionTasks(import.meta.env.BASE_URL + 'wasm').catch((error) => {
+    visionPromise = null
+    throw error
+  })
   return visionPromise
 }
 
 export type PoseModel = 'lite' | 'full'
 
-export async function createPoseLandmarker(numPoses: number, model: PoseModel = 'lite'): Promise<PoseLandmarker> {
-  const vision = await getVision()
+export async function createPoseLandmarker(
+  numPoses: number,
+  model: PoseModel = 'lite',
+  workerFileset?: VisionFileset,
+): Promise<PoseLandmarker> {
+  const vision = workerFileset ?? await getVision()
   const options = {
     baseOptions: {
       modelAssetPath: import.meta.env.BASE_URL + `models/pose_landmarker_${model}.task`,

@@ -13,6 +13,8 @@ import type { Landmark3 } from './angles'
  */
 
 const SAMPLE_FPS = 15
+const TRACK_VERSION = 3
+const MAX_INPUT_WIDTH = 640
 /** x, y, visibility for the drawn skeleton; x, y, z for the maths. */
 const VALUES_PER_LANDMARK = 6
 const LANDMARK_COUNT = 33
@@ -32,6 +34,20 @@ export interface TrackFrame {
   world: Landmark3[]
 }
 
+export interface AnalysisMetrics {
+  method: string
+  totalMs: number
+  setupMs: number
+  modelMs: number
+  decodeMs: number
+  inferenceMs: number
+  packMs: number
+  decodedFrames: number
+  inferredFrames: number
+  inputWidth: number
+  model: string
+}
+
 /**
  * Walks the video and records the dancer.
  *
@@ -44,14 +60,75 @@ export async function analyseVideo(
   blob: Blob,
   onProgress: (fraction: number) => void,
   shouldStop: () => boolean = () => false,
+  onMetrics?: (metrics: AnalysisMetrics) => void,
+  onFallback?: (reason: string) => void,
 ): Promise<PoseTrack | null> {
+  if (typeof Worker !== 'undefined' && typeof VideoDecoder !== 'undefined' && typeof OffscreenCanvas !== 'undefined') {
+    try {
+      return await analyseVideoInWorker(blob, onProgress, shouldStop, onMetrics)
+    } catch (error) {
+      console.warn('WebCodecs analysis failed; using video seek fallback', error)
+      onFallback?.(error instanceof Error ? error.message : String(error))
+    }
+  }
+  return analyseVideoLegacy(blob, onProgress, shouldStop, onMetrics)
+}
+
+function analyseVideoInWorker(
+  blob: Blob,
+  onProgress: (fraction: number) => void,
+  shouldStop: () => boolean,
+  onMetrics?: (metrics: AnalysisMetrics) => void,
+): Promise<PoseTrack | null> {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL('./analysis.worker.ts', import.meta.url), { type: 'module' })
+    const cancel = window.setInterval(() => {
+      if (!shouldStop()) return
+      clearInterval(cancel)
+      worker.terminate()
+      resolve(null)
+    }, 100)
+    worker.onmessage = (event) => {
+      const message = event.data
+      if (message.type === 'progress') onProgress(message.fraction)
+      if (message.type === 'error') {
+        clearInterval(cancel)
+        worker.terminate()
+        reject(new Error(message.message))
+      }
+      if (message.type === 'complete') {
+        clearInterval(cancel)
+        worker.terminate()
+        onProgress(1)
+        onMetrics?.(message.metrics)
+        resolve({ fps: message.fps, frames: message.frames, data: new Float32Array(message.buffer) })
+      }
+    }
+    worker.onerror = (event) => {
+      clearInterval(cancel)
+      worker.terminate()
+      reject(new Error(event.message))
+    }
+    worker.postMessage({ blob })
+  })
+}
+
+async function analyseVideoLegacy(
+  blob: Blob,
+  onProgress: (fraction: number) => void,
+  shouldStop: () => boolean,
+  onMetrics?: (metrics: AnalysisMetrics) => void,
+): Promise<PoseTrack | null> {
+  const started = performance.now()
   const url = URL.createObjectURL(blob)
   const video = document.createElement('video')
   video.src = url
   video.muted = true
   video.playsInline = true
 
+  const modelStarted = performance.now()
   const landmarker = await createPoseLandmarker(1)
+  const modelMs = performance.now() - modelStarted
   const canvas = document.createElement('canvas')
 
   try {
@@ -64,19 +141,26 @@ export async function analyseVideo(
 
     const frames = Math.max(1, Math.ceil(duration * SAMPLE_FPS))
     const data = new Float32Array(frames * STRIDE).fill(NaN)
-    canvas.width = video.videoWidth
-    canvas.height = video.videoHeight
+    const scale = Math.min(1, MAX_INPUT_WIDTH / video.videoWidth)
+    canvas.width = Math.max(1, Math.round(video.videoWidth * scale))
+    canvas.height = Math.max(1, Math.round(video.videoHeight * scale))
     const ctx = canvas.getContext('2d')!
 
     let stamp = 0
+    let decodeMs = 0
+    let inferenceMs = 0
     for (let i = 0; i < frames; i++) {
       if (shouldStop()) return null
       const t = Math.min(duration - 1e-3, i / SAMPLE_FPS)
+      const decodeStarted = performance.now()
       await seek(video, t)
       // Through a 2D canvas: a freshly seeked video can upload as an empty
       // frame to WebGL, which would silently record nothing.
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+      decodeMs += performance.now() - decodeStarted
+      const inferenceStarted = performance.now()
       const res = landmarker.detectForVideo(canvas, ++stamp)
+      inferenceMs += performance.now() - inferenceStarted
       const lm = res.landmarks[0]
       const world = res.worldLandmarks[0]
       if (lm && world) {
@@ -98,6 +182,20 @@ export async function analyseVideo(
       }
     }
     onProgress(1)
+    const totalMs = performance.now() - started
+    onMetrics?.({
+      method: 'Video seek fallback',
+      totalMs,
+      setupMs: Math.max(0, totalMs - modelMs - decodeMs - inferenceMs),
+      modelMs,
+      decodeMs,
+      inferenceMs,
+      packMs: 0,
+      decodedFrames: frames,
+      inferredFrames: frames,
+      inputWidth: canvas.width,
+      model: 'gpu-or-cpu fallback',
+    })
     return { fps: SAMPLE_FPS, frames, data }
   } finally {
     landmarker.close()
@@ -108,17 +206,44 @@ export async function analyseVideo(
 
 function seek(video: HTMLVideoElement, t: number): Promise<void> {
   return new Promise((resolve) => {
+    const frameVideo = video as unknown as {
+      requestVideoFrameCallback?: HTMLVideoElement['requestVideoFrameCallback']
+      cancelVideoFrameCallback?: HTMLVideoElement['cancelVideoFrameCallback']
+    }
     let done = false
+    let timer = 0
+    let frameCallback = 0
     const finish = () => {
       if (done) return
       done = true
-      video.removeEventListener('seeked', finish)
+      clearTimeout(timer)
+      video.removeEventListener('seeked', paintedFallback)
+      video.removeEventListener('loadeddata', finish)
+      if (frameCallback) frameVideo.cancelVideoFrameCallback?.call(video, frameCallback)
       resolve()
     }
-    video.addEventListener('seeked', finish)
-    video.currentTime = t
-    // Never let one stubborn seek stall the whole analysis.
-    setTimeout(finish, 400)
+
+    const paintedFallback = () => requestAnimationFrame(() => requestAnimationFrame(finish))
+    // Corrupt media must not stall the entire import.
+    timer = window.setTimeout(finish, 1000)
+
+    if (Math.abs(video.currentTime - t) < 1e-4) {
+      if (video.readyState >= 2) finish()
+      else video.addEventListener('loadeddata', finish, { once: true })
+    } else if (frameVideo.requestVideoFrameCallback) {
+      // Register before seeking. Registering from `seeked` is too late on
+      // Chromium: the requested frame has already been presented, leaving the
+      // callback waiting until the safety timeout.
+      const onFrame = (_now: number, metadata: VideoFrameCallbackMetadata) => {
+        if (Math.abs(metadata.mediaTime - t) <= 1 / SAMPLE_FPS) finish()
+        else frameCallback = frameVideo.requestVideoFrameCallback!.call(video, onFrame)
+      }
+      frameCallback = frameVideo.requestVideoFrameCallback.call(video, onFrame)
+      video.currentTime = t
+    } else {
+      video.addEventListener('seeked', paintedFallback, { once: true })
+      video.currentTime = t
+    }
   })
 }
 
@@ -152,14 +277,14 @@ function read(track: PoseTrack, i: number, j: number, f: number): TrackFrame {
   return { landmarks, world }
 }
 
-export const packTrack = (t: PoseTrack): { fps: number; frames: number; buffer: ArrayBuffer } => ({
+export const packTrack = (t: PoseTrack): { version: number; fps: number; frames: number; buffer: ArrayBuffer } => ({
+  version: TRACK_VERSION,
   fps: t.fps,
   frames: t.frames,
   buffer: t.data.buffer.slice(0) as ArrayBuffer,
 })
 
-export const unpackTrack = (p: { fps: number; frames: number; buffer: ArrayBuffer }): PoseTrack => ({
-  fps: p.fps,
-  frames: p.frames,
-  data: new Float32Array(p.buffer),
-})
+export const unpackTrack = (p: { version?: number; fps: number; frames: number; buffer: ArrayBuffer }): PoseTrack | null =>
+  p.version === TRACK_VERSION
+    ? { fps: p.fps, frames: p.frames, data: new Float32Array(p.buffer) }
+    : null

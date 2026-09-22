@@ -42,6 +42,7 @@ export interface SectionStat {
 }
 
 export interface StoredTrack {
+  version?: number
   fps: number
   frames: number
   buffer: ArrayBuffer
