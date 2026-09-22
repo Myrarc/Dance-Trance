@@ -150,10 +150,11 @@ header .sub {
   position: absolute;
   inset: 0;
   z-index: 20;
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   pointer-events: none;
-  background: rgba(48, 35, 63, 0.48);
+  background: rgba(48, 35, 63, 0.24);
   color: var(--panel);
   font-family: 'Trance Display', Impact, sans-serif;
   font-size: clamp(72px, 16vw, 180px);

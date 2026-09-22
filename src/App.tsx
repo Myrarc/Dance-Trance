@@ -413,7 +413,7 @@ export default function App() {
         </section>
       )}
 
-      {src && (
+      {src && gamePhase !== 'countdown' && (
         <section className={`game-flow game-${gamePhase}`} aria-live="polite">
           {gamePhase === 'lobby' && (
             <>
@@ -426,7 +426,6 @@ export default function App() {
               </button>
             </>
           )}
-          {gamePhase === 'countdown' && <strong className="game-flow-callout">Get ready · {countdown}</strong>}
           {gamePhase === 'playing' && (
             <div className="game-score-strip">
               {(gamePlayers.length ? gamePlayers : Array.from({ length: Math.max(1, lobby.players) }, () => null)).map((player, index) => (
