@@ -73,6 +73,10 @@ export const ZH: Record<string, string> = {
   'Hide skeletons': '隐藏骨架',
   'Show skeletons': '显示骨架',
   'Show or hide both pose overlays': '显示或隐藏两侧的姿态骨架',
+  "Don't use head track": '不追踪头部',
+  'Use head track': '追踪头部',
+  "Don't use head track — hides head hit markers and excludes head from score":
+    '不追踪头部——隐藏头部打击点，打分时不计头部动作',
   'Library': '舞蹈库',
   'Remove from library': '从库中移除',
   'Please choose a video file': '请选择一个视频文件',

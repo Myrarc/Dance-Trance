@@ -22,9 +22,20 @@ import { computeAngles, dimmedSegments, type Focus, type Landmark3, type PoseFea
 import { facing, type Facing } from '../pose/skeleton'
 import { LandmarkSmoother } from '../pose/filter'
 import { sampleTrack, type AnalysisMetrics, type PoseTrack } from '../pose/track'
-import { buildHitTargets, upcomingHitTargets, type HitJoint } from '../pose/hitTargets'
+import {
+  buildHitTargets,
+  upcomingHitTargets,
+  type HitTarget,
+} from '../pose/hitTargets'
+import {
+  HIT_LEAD_S,
+  HIT_COLORS,
+  drawHitRail,
+  drawArcadeHitMarker,
+} from '../pose/arcade'
 import SectionList from './SectionList'
 import { activeSection, newSectionId, type Section, type SectionStat } from '../lib/library'
+import type { GamePhase } from '../pose/gameplay'
 
 export interface TargetPose {
   feature: PoseFeature | null
@@ -36,124 +47,12 @@ export interface TargetPose {
   time: number
   /** Which way the reference dancer is facing, or null when side-on. */
   facing: Facing | null
+  /** Hit targets from the analysed track, for rendering cues. */
+  hitTargets?: HitTarget[]
 }
 
 /** Video seconds of lag the comparison will forgive. */
 const LAG_WINDOW_S = 1
-const HIT_LEAD_S = 0.8
-
-const HIT_COLORS: Record<HitJoint, string> = {
-  head: '#7df4ff',
-  leftHand: SIDE_COLORS.left,
-  rightHand: SIDE_COLORS.right,
-  leftFoot: SIDE_COLORS.left,
-  rightFoot: SIDE_COLORS.right,
-}
-
-function drawHitRail(
-  ctx: CanvasRenderingContext2D,
-  from: { x: number; y: number },
-  to: { x: number; y: number },
-  color: string,
-  width: number,
-) {
-  const dx = to.x - from.x
-  const dy = to.y - from.y
-  const length = Math.hypot(dx, dy)
-  if (length < 1) return
-  const ox = (-dy / length) * width * 0.9
-  const oy = (dx / length) * width * 0.9
-
-  ctx.save()
-  ctx.globalCompositeOperation = 'lighter'
-  ctx.strokeStyle = color
-  ctx.lineWidth = Math.max(1.5, width * 0.36)
-  ctx.globalAlpha = 0.55
-  ctx.shadowColor = color
-  ctx.shadowBlur = width * 1.5
-  for (const side of [-1, 1]) {
-    ctx.beginPath()
-    ctx.moveTo(from.x + ox * side, from.y + oy * side)
-    ctx.lineTo(to.x + ox * side, to.y + oy * side)
-    ctx.stroke()
-  }
-  ctx.restore()
-}
-
-function drawArcadeHitMarker(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  radius: number,
-  color: string,
-  remaining: number,
-  reduceMotion: boolean,
-) {
-  const countdown = Math.max(0, Math.min(1, remaining / HIT_LEAD_S))
-  const impact = remaining <= 0 ? Math.max(0, 1 + remaining / 0.12) : 0
-  const pulse = reduceMotion ? 1 : 1 + impact * 0.28
-  const r = radius * pulse
-  const line = Math.max(2, radius * 0.075)
-
-  ctx.save()
-  ctx.globalCompositeOperation = 'lighter'
-
-  const halo = ctx.createRadialGradient(x, y, radius * 0.12, x, y, r * 1.5)
-  halo.addColorStop(0, `${color}55`)
-  halo.addColorStop(0.5, `${color}20`)
-  halo.addColorStop(1, `${color}00`)
-  ctx.fillStyle = halo
-  ctx.beginPath()
-  ctx.arc(x, y, r * 1.5, 0, Math.PI * 2)
-  ctx.fill()
-
-  ctx.strokeStyle = color
-  ctx.shadowColor = color
-  ctx.shadowBlur = radius * 0.28
-  for (const [scale, alpha] of [[0.58, 0.9], [0.78, 0.7], [1, 0.95]] as const) {
-    ctx.globalAlpha = alpha
-    ctx.lineWidth = scale === 1 ? line * 1.25 : line * 0.65
-    ctx.beginPath()
-    ctx.arc(x, y, r * scale, 0, Math.PI * 2)
-    ctx.stroke()
-  }
-
-  // The warm outer sweep is the clock: it contracts towards the hit point.
-  ctx.globalAlpha = 1
-  ctx.strokeStyle = '#fff2a8'
-  ctx.shadowColor = '#fff2a8'
-  ctx.shadowBlur = radius * 0.22
-  ctx.lineCap = 'round'
-  ctx.lineWidth = line * 1.5
-  ctx.beginPath()
-  ctx.arc(x, y, r * 1.22, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * countdown)
-  ctx.stroke()
-
-  // Four small breaks keep the marker reading as a game reticle, not a chart.
-  ctx.shadowBlur = 0
-  ctx.strokeStyle = '#ffffff'
-  ctx.lineWidth = line * 0.55
-  for (let i = 0; i < 4; i++) {
-    const angle = i * Math.PI / 2
-    const inner = r * 0.33
-    const outer = r * 0.44
-    ctx.beginPath()
-    ctx.moveTo(x + Math.cos(angle) * inner, y + Math.sin(angle) * inner)
-    ctx.lineTo(x + Math.cos(angle) * outer, y + Math.sin(angle) * outer)
-    ctx.stroke()
-  }
-
-  if (impact > 0) {
-    ctx.globalAlpha = impact
-    ctx.fillStyle = '#ffffff'
-    ctx.shadowColor = color
-    ctx.shadowBlur = radius * 0.7
-    ctx.beginPath()
-    ctx.arc(x, y, radius * (0.12 + impact * 0.12), 0, Math.PI * 2)
-    ctx.fill()
-  }
-  ctx.restore()
-}
 
 interface Props {
   src: string
@@ -169,6 +68,11 @@ interface Props {
   analysisMetrics?: AnalysisMetrics | null
   analysisMessage?: string | null
   showSkeletons: boolean
+  trackHead?: boolean
+  gamePhase?: GamePhase
+  countdown?: number
+  gameRun?: number
+  onGameEnd?: () => void
 }
 
 
@@ -249,12 +153,22 @@ export default function VideoPanel({
   analysisMetrics,
   analysisMessage,
   showSkeletons,
+  trackHead = true,
+  gamePhase = 'lobby',
+  countdown = 3,
+  gameRun = 0,
+  onGameEnd,
 }: Props) {
   const trackRef = useRef<PoseTrack | null>(null)
   trackRef.current = track ?? null
-  const hitTargets = useMemo(() => (track ? buildHitTargets(track) : []), [track])
+  const hitTargets = useMemo(
+    () => (track ? (trackHead ? buildHitTargets(track) : buildHitTargets(track).filter((t) => t.joint !== 'head')) : []),
+    [track, trackHead],
+  )
   const hitTargetsRef = useRef(hitTargets)
   hitTargetsRef.current = hitTargets
+  const trackHeadRef = useRef(trackHead)
+  trackHeadRef.current = trackHead
   const reduceMotionRef = useRef(false)
   const focusRef = useRef<Focus>('full')
   focusRef.current = focus
@@ -321,10 +235,26 @@ export default function VideoPanel({
   mirrorRef.current = mirror
 
   useEffect(() => {
-    // A completed analysis can arrive while playback is paused at the same
+    // A completed analysis or preference change can arrive while playback is paused at the same
     // timestamp; force the new track and its hit markers to paint once.
     lastTimeRef.current = -1
-  }, [track])
+  }, [track, trackHead])
+
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+    if (gamePhase === 'countdown') {
+      video.pause()
+      video.currentTime = 0
+      setLoopA(null)
+      setLoopB(null)
+    } else if (gamePhase === 'playing') {
+      video.currentTime = 0
+      void video.play()
+    } else if (gamePhase === 'results') {
+      video.pause()
+    }
+  }, [gamePhase, gameRun])
 
   useEffect(() => {
     const query = window.matchMedia('(prefers-reduced-motion: reduce)')
@@ -577,6 +507,7 @@ export default function VideoPanel({
         target.sectionId = activeSection(sectionsRef.current, v.currentTime)?.id ?? null
         // Side-on frames report nothing; hold the last confident reading.
         target.facing = facing(selected) ?? target.facing
+        target.hitTargets = hitTargetsRef.current
 
         // A seek or a loop makes earlier frames meaningless as "what they were
         // copying a moment ago", so the window restarts.
@@ -624,7 +555,12 @@ export default function VideoPanel({
       lastPoseRef.current = selected
 
       const markerRadius = Math.max(28, vh * 0.052)
-      const upcoming = upcomingHitTargets(hitTargetsRef.current, v.currentTime, HIT_LEAD_S)
+      const upcoming = upcomingHitTargets(
+        hitTargetsRef.current,
+        v.currentTime,
+        HIT_LEAD_S,
+        trackHeadRef.current,
+      )
       const points = upcoming.map((target) => ({
         target,
         x: (mirrorRef.current ? 1 - target.x : target.x) * vw,
@@ -902,6 +838,7 @@ export default function VideoPanel({
           onTimeUpdate={onTimeUpdate}
           onPlay={() => setPlaying(true)}
           onPause={() => setPlaying(false)}
+          onEnded={onGameEnd}
         />
         <canvas
           ref={canvasRef}
@@ -911,16 +848,20 @@ export default function VideoPanel({
         />
         <canvas ref={hitCanvasRef} className="hit-canvas" aria-hidden="true" />
         </div>
+        {gamePhase === 'countdown' && (
+          <div className="game-countdown" aria-live="assertive">{countdown}</div>
+        )}
       </div>
 
       <div className="transport">
-        <button className="btn play" onClick={togglePlay}>
+        <button className="btn play" onClick={togglePlay} aria-label={playing ? 'Pause reference video' : 'Play reference video'}>
           {playing ? '⏸' : '▶'}
         </button>
         <span className="time">{fmt(currentTime)}</span>
         <input
           className="seek"
           type="range"
+          aria-label="Reference video position"
           min={0}
           max={duration || 0}
           step={0.01}

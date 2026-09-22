@@ -6,6 +6,7 @@ interface Props {
   entries: LibraryEntry[]
   stats: Map<string, VideoStats>
   currentId: string | null
+  selectedId?: string | null
   onOpen: (entry: LibraryEntry) => void
   onForget: (entry: LibraryEntry) => void
   /** Shown when the list is empty, i.e. before anything has been loaded. */
@@ -21,24 +22,25 @@ function when(ts: number): string {
   return `${Math.floor(days / 30)}mo ago`
 }
 
-export default function Library({ entries, stats, currentId, onOpen, onForget, emptyHint }: Props) {
+export default function Library({ entries, stats, currentId, selectedId, onOpen, onForget, emptyHint }: Props) {
   if (!entries.length) {
     return emptyHint ? <p className="library-empty">{emptyHint}</p> : null
   }
 
   return (
-    <ul className="library">
+    <ul className="library" aria-label="Song library">
       {entries.map((entry) => {
         const s = stats.get(entry.id)
         const missing = !entry.hasVideo
         return (
           <li
             key={entry.id}
-            className={`library-item${entry.id === currentId ? ' is-current' : ''}${missing ? ' is-missing' : ''}`}
+            className={`library-item${entry.id === currentId ? ' is-current' : ''}${entry.id === selectedId ? ' is-gesture-selected' : ''}${missing ? ' is-missing' : ''}`}
           >
             <button
               className="library-open"
               onClick={() => onOpen(entry)}
+              aria-current={entry.id === selectedId ? 'true' : undefined}
               title={missing ? `${entry.name} — pick this file again to reload it` : entry.name}
             >
               <span className="library-thumb">

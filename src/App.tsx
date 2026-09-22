@@ -36,6 +36,9 @@ import {
   type VideoStats,
 } from './playkitClient'
 import { loadSkeletonsVisible, saveSkeletonsVisible } from './lib/skeletonVisibility'
+import { loadTrackHead, saveTrackHead } from './lib/headTrackPreference'
+import { accuracy, type GamePhase, type PlayerRound } from './pose/gameplay'
+import type { GestureContext, MenuGesture } from './pose/gestures'
 
 export default function App() {
   const [src, setSrc] = useState<string | null>(null)
@@ -50,6 +53,13 @@ export default function App() {
   const [analysisMetrics, setAnalysisMetrics] = useState<AnalysisMetrics | null>(null)
   const [analysisMessage, setAnalysisMessage] = useState<string | null>(null)
   const [showSkeletons, setShowSkeletons] = useState(loadSkeletonsVisible)
+  const [trackHead, setTrackHead] = useState(loadTrackHead)
+  const [gamePhase, setGamePhase] = useState<GamePhase>('lobby')
+  const [countdown, setCountdown] = useState(3)
+  const [gameRun, setGameRun] = useState(0)
+  const [lobby, setLobby] = useState({ ready: false, players: 0 })
+  const [gamePlayers, setGamePlayers] = useState<PlayerRound[]>([])
+  const [gestureSelectedId, setGestureSelectedId] = useState<string | null>(null)
   const targetRef = useRef<TargetPose>({
     feature: null,
     history: [],
@@ -118,6 +128,55 @@ export default function App() {
       cancelled = true
     }
   }, [currentId])
+
+  useEffect(() => {
+    setGamePhase('lobby')
+    setLobby({ ready: false, players: 0 })
+    setGamePlayers([])
+  }, [currentId])
+
+  useEffect(() => {
+    if (!library.length) {
+      setGestureSelectedId(null)
+      return
+    }
+    setGestureSelectedId((selected) =>
+      selected && library.some((entry) => entry.id === selected)
+        ? selected
+        : currentId ?? library[0].id,
+    )
+  }, [currentId, library])
+
+  useEffect(() => {
+    if (gamePhase !== 'countdown') return
+    setCountdown(3)
+    const started = performance.now()
+    const timer = window.setInterval(() => {
+      const remaining = 3 - Math.floor((performance.now() - started) / 1000)
+      if (remaining <= 0) {
+        clearInterval(timer)
+        setGamePhase('playing')
+      } else setCountdown(remaining)
+    }, 100)
+    return () => clearInterval(timer)
+  }, [gamePhase, gameRun])
+
+  const startRound = () => {
+    if (!track || !lobby.ready) return
+    setGamePlayers([])
+    setGameRun((run) => run + 1)
+    setGamePhase('countdown')
+  }
+
+  const finishRound = () => {
+    setGamePhase((phase) => (phase === 'playing' ? 'results' : phase))
+  }
+
+  const updateLobby = useCallback((ready: boolean, players: number) => {
+    setLobby((current) => current.ready === ready && current.players === players ? current : { ready, players })
+  }, [])
+
+  const updateGameScores = useCallback((players: PlayerRound[]) => setGamePlayers(players), [])
 
   const analyseBlob = async (entry: LibraryEntry, blob: Blob) => {
     if (analysing != null) return
@@ -223,13 +282,58 @@ export default function App() {
     await refresh()
   }
 
+  const libraryVisible = libraryOpen || !src
+  const gestureContext: GestureContext | null =
+    libraryVisible && library.length
+      ? 'library'
+      : src && gamePhase === 'results'
+        ? 'results'
+        : src && gamePhase === 'lobby' && lobby.ready
+          ? 'lobby'
+          : null
+
+  const handleGestureAction = (gesture: MenuGesture) => {
+    if (gestureContext === 'library') {
+      if (gesture === 'back' && src) {
+        setLibraryOpen(false)
+        return
+      }
+      if (gesture === 'confirm') {
+        const selected = library.find((entry) => entry.id === gestureSelectedId)
+        if (selected) void openEntry(selected)
+        return
+      }
+      if (gesture === 'previous' || gesture === 'next') {
+        const currentIndex = Math.max(0, library.findIndex((entry) => entry.id === gestureSelectedId))
+        const step = gesture === 'previous' ? -1 : 1
+        const nextIndex = (currentIndex + step + library.length) % library.length
+        setGestureSelectedId(library[nextIndex].id)
+      }
+      return
+    }
+    if (gestureContext === 'lobby') {
+      if (gesture === 'confirm') startRound()
+      if (gesture === 'back') setLibraryOpen(true)
+      return
+    }
+    if (gestureContext === 'results') {
+      if (gesture === 'confirm') startRound()
+      if (gesture === 'back') {
+        setGamePhase('lobby')
+        setLibraryOpen(true)
+      }
+    }
+  }
+
   useLangTick()
   return (
     <div className="app">
       <LangGlobe />
       <header>
-        <h1>
-          Dance Trainer <span className="sub">{T('Load any dance video and follow the outline')}</span>
+        <h1 className="brand-lockup">
+          <span className="brand-dance">Dance</span>
+          <span className="brand-trance">Trance</span>
+          <span className="sub">{T('Your moves light up the room')}</span>
         </h1>
         {library.length > 0 && (
           <button
@@ -254,6 +358,20 @@ export default function App() {
         >
           {T(showSkeletons ? 'Hide skeletons' : 'Show skeletons')}
         </button>
+        <button
+          className={`btn subtle ${!trackHead ? 'active' : ''}`}
+          aria-pressed={!trackHead}
+          onClick={() =>
+            setTrackHead((active) => {
+              const next = !active
+              saveTrackHead(next)
+              return next
+            })
+          }
+          title={T("Don't use head track — hides head hit markers and excludes head from score")}
+        >
+          {T(trackHead ? "Don't use head track" : 'Use head track')}
+        </button>
         <label className="btn primary upload">
           {T(src ? 'Change video' : 'Load video')}
           <input
@@ -272,10 +390,19 @@ export default function App() {
 
       {libraryOpen && library.length > 0 && (
         <section className="library-panel">
+          <div className="library-title-row">
+            <h2>Pick a track</h2>
+            <span>Good songs · brighter moves</span>
+          </div>
+          <div className="gesture-guide">
+            <strong>Gesture controls</strong>
+            <span>One arm to browse · both hands up to select · cross arms to close</span>
+          </div>
           <Library
             entries={library}
             stats={stats}
             currentId={current?.id ?? null}
+            selectedId={gestureSelectedId}
             onOpen={(e) => void openEntry(e)}
             onForget={(e) => void forgetEntry(e)}
           />
@@ -283,6 +410,53 @@ export default function App() {
             Videos are kept on this device only. Signed in, the list and your practice totals follow
             you; the footage does not.
           </p>
+        </section>
+      )}
+
+      {src && (
+        <section className={`game-flow game-${gamePhase}`} aria-live="polite">
+          {gamePhase === 'lobby' && (
+            <>
+              <div>
+                <strong>{track ? (lobby.ready ? `${lobby.players} player${lobby.players === 1 ? '' : 's'} ready` : 'Player lobby') : 'Analysing song'}</strong>
+                <span>{!track ? 'Hit markers are required before playing' : lobby.ready ? 'Raise both hands to start · cross arms for songs' : 'Enter the camera zones and hold a T-pose'}</span>
+              </div>
+              <button className="btn primary" onClick={startRound} disabled={!track || !lobby.ready}>
+                Start game
+              </button>
+            </>
+          )}
+          {gamePhase === 'countdown' && <strong className="game-flow-callout">Get ready · {countdown}</strong>}
+          {gamePhase === 'playing' && (
+            <div className="game-score-strip">
+              {(gamePlayers.length ? gamePlayers : Array.from({ length: Math.max(1, lobby.players) }, () => null)).map((player, index) => (
+                <span key={index}>
+                  <b>P{index + 1}</b> {player?.score.toLocaleString() ?? '0'}
+                  <small>{player?.combo ? `${player.combo}× combo` : 'build your combo'}</small>
+                </span>
+              ))}
+            </div>
+          )}
+          {gamePhase === 'results' && (
+            <div className="game-results">
+              <h2>Dance complete</h2>
+              <div className="result-players">
+                {gamePlayers.map((player, index) => (
+                  <article key={index}>
+                    <h3>Player {index + 1}</h3>
+                    <strong>{player.score.toLocaleString()}</strong>
+                    <span>{accuracy(player)}% accuracy · {player.maxCombo}× max combo</span>
+                    <small>{player.perfect} perfect · {player.good} good · {player.miss} miss</small>
+                  </article>
+                ))}
+              </div>
+              <div className="result-actions">
+                <button className="btn primary" onClick={startRound}>Play again</button>
+                <button className="btn" onClick={() => { setGamePhase('lobby'); setLibraryOpen(true) }}>Choose another song</button>
+              </div>
+              <p className="gesture-hint">Both hands up to replay · cross arms to choose a song</p>
+            </div>
+          )}
         </section>
       )}
 
@@ -301,6 +475,11 @@ export default function App() {
             analysisMetrics={analysisMetrics}
             analysisMessage={analysisMessage}
             showSkeletons={showSkeletons}
+            trackHead={trackHead}
+            gamePhase={gamePhase}
+            countdown={countdown}
+            gameRun={gameRun}
+            onGameEnd={finishRound}
           />
         ) : (
           <section
@@ -317,14 +496,22 @@ export default function App() {
             }}
           >
             <div className="drop-inner">
+              <p className="drop-title">Pick a track</p>
               <p>{T('Drop a dance video here, or load one from the top right')}</p>
               <p className="hint">
                 {T('Solo or group video · click a dancer to follow them · pose detection runs locally, your video is never uploaded')}
               </p>
+              {library.length > 0 && (
+                <div className="gesture-guide">
+                  <strong>Gesture controls</strong>
+                  <span>One arm to browse · both hands up to select</span>
+                </div>
+              )}
               <Library
                 entries={library}
                 stats={stats}
                 currentId={current?.id ?? null}
+                selectedId={gestureSelectedId}
                 onOpen={(e) => void openEntry(e)}
                 onForget={(e) => void forgetEntry(e)}
               />
@@ -339,6 +526,13 @@ export default function App() {
           focus={focus}
           onFocusChange={setFocus}
           showSkeletons={showSkeletons}
+          trackHead={trackHead}
+          gamePhase={gamePhase}
+          gameRun={gameRun}
+          onLobbyChange={updateLobby}
+          onGameScores={updateGameScores}
+          gestureContext={gestureContext}
+          onGestureAction={handleGestureAction}
         />
       </main>
 

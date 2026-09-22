@@ -8,7 +8,24 @@ import { LandmarkSmoother } from '../pose/filter'
 import { framingProblems } from '../pose/checkup'
 import { FrameMeter, frameTimestampMs, type FrameMetrics } from '../pose/frameMeter'
 import Checkup from './Checkup'
-import { inPlayerZone, isTPose, playerScreenX } from '../pose/gestures'
+import {
+  advanceGestureHold,
+  detectMenuGesture,
+  gestureLabel,
+  inPlayerZone,
+  isTPose,
+  playerScreenX,
+  type GestureContext,
+  type GestureHold,
+  type MenuGesture,
+} from '../pose/gestures'
+import {
+  judgeDueTargets,
+  newPlayerRound,
+  stablePlayerOrder,
+  type GamePhase,
+  type PlayerRound,
+} from '../pose/gameplay'
 
 /** Whether to mirror the comparison; 'auto' follows the reference's facing. */
 type MirrorMode = 'auto' | 'mirror' | 'direct'
@@ -42,6 +59,13 @@ interface Props {
   focus: Focus
   onFocusChange: (focus: Focus) => void
   showSkeletons: boolean
+  trackHead?: boolean
+  gamePhase?: GamePhase
+  gameRun?: number
+  onLobbyChange?: (ready: boolean, players: number) => void
+  onGameScores?: (players: PlayerRound[]) => void
+  gestureContext?: GestureContext | null
+  onGestureAction?: (gesture: MenuGesture) => void
 }
 
 export default function WebcamPanel({
@@ -52,9 +76,18 @@ export default function WebcamPanel({
   focus,
   onFocusChange,
   showSkeletons,
+  trackHead = true,
+  gamePhase = 'lobby',
+  gameRun = 0,
+  onLobbyChange,
+  onGameScores,
+  gestureContext = null,
+  onGestureAction,
 }: Props) {
   const focusRef = useRef<Focus>('full')
   focusRef.current = focus
+  const trackHeadRef = useRef(trackHead)
+  trackHeadRef.current = trackHead
   // Per-phrase totals for this session, plus the clock used to charge time to
   // whichever phrase was on screen.
   const sectionAccumRef = useRef<Record<string, SectionPractice>>({})
@@ -72,6 +105,12 @@ export default function WebcamPanel({
   const readyHoldRef = useRef([0, 0])
   const stableCountRef = useRef({ count: 0, since: 0 })
   const lobbyReadyRef = useRef(false)
+  const playerXRef = useRef<number[]>([])
+  const registeredPlayerCountRef = useRef(1)
+  const roundsRef = useRef<PlayerRound[]>([newPlayerRound(), newPlayerRound()])
+  const gestureHoldRef = useRef<GestureHold>({ candidate: null, since: 0, latched: false })
+  const gestureContextRef = useRef(gestureContext)
+  const onGestureActionRef = useRef(onGestureAction)
   // Latest reading, so the guided check can sample without its own detector.
   const latestRef = useRef<{ feature: PoseFeature; framing: string[] } | null>(null)
   const lastUiRef = useRef(0)
@@ -100,8 +139,30 @@ export default function WebcamPanel({
     tPose: [],
   })
   const [lobbyReady, setLobbyReady] = useState(false)
+  const [gestureFeedback, setGestureFeedback] = useState<{ gesture: MenuGesture | null; progress: number }>({
+    gesture: null,
+    progress: 0,
+  })
+  const playerSetupCountRef = useRef(playerSetup.count)
+  playerSetupCountRef.current = playerSetup.count
 
   mirrorModeRef.current = mirrorMode
+  gestureContextRef.current = gestureContext
+  onGestureActionRef.current = onGestureAction
+
+  useEffect(() => {
+    if (!gestureHoldRef.current.latched) {
+      gestureHoldRef.current = { candidate: null, since: 0, latched: false }
+    }
+    setGestureFeedback({ gesture: null, progress: 0 })
+  }, [gestureContext])
+
+  useEffect(() => {
+    if (gamePhase !== 'countdown') return
+    registeredPlayerCountRef.current = Math.max(1, playerSetupCountRef.current)
+    roundsRef.current = [newPlayerRound(), newPlayerRound()]
+    onGameScores?.(roundsRef.current.slice(0, registeredPlayerCountRef.current))
+  }, [gamePhase, gameRun, onGameScores])
 
   // Asking every session is friction for something already agreed to, so if
   // the permission is on record the camera comes up by itself. Browsers that
@@ -155,6 +216,7 @@ export default function WebcamPanel({
       readyHoldRef.current = [0, 0]
       stableCountRef.current = { count: 0, since: performance.now() }
       lobbyReadyRef.current = false
+      gestureHoldRef.current = { candidate: null, since: 0, latched: false }
       setLobbyReady(false)
       setRunning(true)
     } catch (e) {
@@ -201,6 +263,7 @@ export default function WebcamPanel({
     playerSmoothersRef.current.forEach((smoother) => smoother.reset())
     readyHoldRef.current = [0, 0]
     lobbyReadyRef.current = false
+    gestureHoldRef.current = { candidate: null, since: 0, latched: false }
     setRunning(false)
     setLobbyReady(false)
     setPlayerSetup({ count: 0, progress: [], inZone: [], tPose: [] })
@@ -240,11 +303,18 @@ export default function WebcamPanel({
       const ctx = cv.getContext('2d')!
       ctx.clearRect(0, 0, cv.width, cv.height)
 
-      const detected = res.landmarks
+      const detectedByX = res.landmarks
         .map((pose, index) => ({ pose, world: res.worldLandmarks[index], x: playerScreenX(pose) }))
         .filter((player) => player.x !== null)
         .sort((a, b) => a.x! - b.x!)
         .slice(0, 2)
+      const detected = stablePlayerOrder(
+        detectedByX.map((player) => ({ ...player, x: player.x! })),
+        playerXRef.current,
+      )
+      if (gamePhase !== 'playing' || registeredPlayerCountRef.current === detected.length) {
+        playerXRef.current = detected.map((player) => player.x)
+      }
       const count = detected.length
       if (stableCountRef.current.count !== count) {
         stableCountRef.current = { count, since: frameNow }
@@ -283,8 +353,28 @@ export default function WebcamPanel({
       // Steady the landmarks before anything reads them, so a body holding
       // still produces a still skeleton and a steady score.
       const pose = raw ? smootherRef.current.filter(raw, timestampMs / 1000) : undefined
+      let gestureReading = {
+        ...gestureHoldRef.current,
+        progress: gestureHoldRef.current.latched ? 1 : 0,
+        fired: null as MenuGesture | null,
+      }
+      if (lobbyReadyRef.current && gestureContextRef.current) {
+        gestureReading = advanceGestureHold(
+          gestureHoldRef.current,
+          detectMenuGesture(pose),
+          frameNow,
+        )
+        gestureHoldRef.current = gestureReading
+        if (gestureReading.fired) onGestureActionRef.current?.(gestureReading.fired)
+      }
       const target = targetRef.current
       let frameScore: number | null = null
+      const registeredPlayerCount = registeredPlayerCountRef.current
+      const frameScores: (number | null)[] = Array.from({ length: registeredPlayerCount }, () => null)
+      const scoreSlots = detected.map((player, index) => {
+        if (registeredPlayerCount !== 2 || detected.length === 2 || playerXRef.current.length !== 2) return index
+        return Math.abs(player.x - playerXRef.current[0]) <= Math.abs(player.x - playerXRef.current[1]) ? 0 : 1
+      })
       let frameProblems: string[] = []
       let frameLag: number | null = null
       if (pose && world && lobbyReadyRef.current) {
@@ -297,7 +387,15 @@ export default function WebcamPanel({
           mirrorModeRef.current === 'auto'
             ? target.facing !== 'back'
             : mirrorModeRef.current === 'mirror'
-        const cmp = compareToHistory(user, target.history, target.time, mirrored, lagStateRef.current, focusRef.current)
+        const cmp = compareToHistory(
+          user,
+          target.history,
+          target.time,
+          mirrored,
+          lagStateRef.current,
+          focusRef.current,
+          trackHeadRef.current,
+        )
         drawSkeleton(ctx, pose, cv.width, cv.height, {
           color: LEVEL_COLORS.na,
           lineWidth: 7,
@@ -306,8 +404,36 @@ export default function WebcamPanel({
           dimmed: dimmedSegments(focusRef.current),
         })
         frameScore = cmp.score
+        frameScores[scoreSlots[0] ?? 0] = cmp.score
         frameProblems = cmp.problems
         frameLag = cmp.lag
+      }
+      if (lobbyReadyRef.current && poses[1] && detected[1]?.world) {
+        const second = computeAngles(detected[1].world)
+        const mirrored =
+          mirrorModeRef.current === 'auto'
+            ? target.facing !== 'back'
+            : mirrorModeRef.current === 'mirror'
+        frameScores[scoreSlots[1] ?? 1] = compareToHistory(
+          second,
+          target.history,
+          target.time,
+          mirrored,
+          { lag: lagStateRef.current.lag },
+          focusRef.current,
+          trackHeadRef.current,
+        ).score
+      }
+
+      if (gamePhase === 'playing' && target.hitTargets?.length) {
+        let changed = false
+        for (let index = 0; index < registeredPlayerCount; index++) {
+          const before = roundsRef.current[index]
+          const after = judgeDueTargets(before, frameScores[index] ?? null, target.time, target.hitTargets)
+          roundsRef.current[index] = after
+          if (after !== before) changed = true
+        }
+        if (changed) onGameScores?.(roundsRef.current.slice(0, registeredPlayerCount))
       }
       if (!lobbyReadyRef.current) {
         for (const playerPose of poses) {
@@ -372,6 +498,8 @@ export default function WebcamPanel({
             : mirrorModeRef.current === 'mirror',
         )
         if (!lobbyReadyRef.current) setPlayerSetup(setup)
+        onLobbyChange?.(lobbyReadyRef.current, count)
+        setGestureFeedback({ gesture: gestureReading.candidate, progress: gestureReading.progress })
       }
       if (frameNow - lastMetricsAt >= 1000) {
         lastMetricsAt = frameNow
@@ -385,7 +513,7 @@ export default function WebcamPanel({
       if (v && 'cancelVideoFrameCallback' in v) v.cancelVideoFrameCallback(handle)
       else cancelAnimationFrame(handle)
     }
-  }, [running, targetRef])
+  }, [running, targetRef, gamePhase, onGameScores, onLobbyChange])
 
   return (
     <section className="panel">
@@ -454,6 +582,13 @@ export default function WebcamPanel({
                 {lag < 0.15 ? 'in time' : `${lag.toFixed(1)}s behind`}
               </span>
             )}
+          </div>
+        )}
+        {running && lobbyReady && gestureContext && gestureFeedback.gesture && !checking && (
+          <div className="gesture-command" aria-live="polite">
+            <strong>{gestureLabel(gestureFeedback.gesture, gestureContext)}</strong>
+            <span>{gestureFeedback.progress >= 1 ? 'Return to neutral' : 'Hold steady'}</span>
+            <i style={{ transform: `scaleX(${gestureFeedback.progress})` }} />
           </div>
         )}
         {running && metrics && (

@@ -1,4 +1,4 @@
-import { LM, type Level } from './skeleton'
+import { LM, type Level } from './skeleton.ts'
 
 /**
  * A landmark with real depth. MediaPipe returns these alongside the projected
@@ -177,6 +177,7 @@ export function compareAngles(
   target: PoseFeature | null,
   mirrored: boolean,
   focus: Focus = 'full',
+  trackHead = true,
 ): Comparison {
   const levels: Record<string, Level> = {}
   const errs: { label: string; err: number }[] = []
@@ -184,7 +185,7 @@ export function compareAngles(
   let n = 0
 
   const judge = (key: string, label: string, mine: Vec | null, theirsRaw: Vec | null) => {
-    if (!inFocus(key, focus)) {
+    if (!inFocus(key, focus) || (key === HEAD && !trackHead)) {
       // Not being practised: shown dimmed, never scored.
       levels[key] = 'na'
       return
@@ -254,13 +255,14 @@ export function compareToHistory(
   mirrored: boolean,
   state: LagState,
   focus: Focus = 'full',
+  trackHead = true,
 ): TimedComparison {
-  if (!history.length) return { ...compareAngles(user, null, mirrored, focus), lag: null }
+  if (!history.length) return { ...compareAngles(user, null, mirrored, focus, trackHead), lag: null }
 
   let bestScore = -1
   let bestLag = state.lag
   for (const frame of history) {
-    const c = compareAngles(user, frame.feature, mirrored, focus)
+    const c = compareAngles(user, frame.feature, mirrored, focus, trackHead)
     if (c.score == null) continue
     if (c.score > bestScore) {
       bestScore = c.score
@@ -281,7 +283,7 @@ export function compareToHistory(
       chosen = frame
     }
   }
-  return { ...compareAngles(user, chosen.feature, mirrored, focus), lag }
+  return { ...compareAngles(user, chosen.feature, mirrored, focus, trackHead), lag }
 }
 
 /** Connection keys for limbs that are not being practised. */

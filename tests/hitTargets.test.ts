@@ -48,3 +48,16 @@ test('shows one upcoming target per body part inside the preview window', () => 
   )
   assert.deepEqual(visible.map((target) => target.joint), ['head', 'leftHand'])
 })
+
+test('hides head hit targets when head tracking is disabled', () => {
+  const visible = upcomingHitTargets(
+    [
+      { time: 1, joint: 'head', x: 0.5, y: 0.2 },
+      { time: 1.1, joint: 'leftHand', x: 0.2, y: 0.4 },
+    ],
+    0.5,
+    0.8,
+    false,
+  )
+  assert.deepEqual(visible.map((target) => target.joint), ['leftHand'])
+})

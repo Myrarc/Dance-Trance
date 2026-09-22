@@ -90,9 +90,15 @@ export function buildHitTargets(track: PoseTrack): HitTarget[] {
 }
 
 /** One imminent cue per body part keeps the playfield readable. */
-export function upcomingHitTargets(targets: HitTarget[], time: number, leadSeconds: number) {
+export function upcomingHitTargets(
+  targets: HitTarget[],
+  time: number,
+  leadSeconds: number,
+  trackHead = true,
+) {
   const upcoming = new Map<HitJoint, HitTarget>()
   for (const target of targets) {
+    if (!trackHead && target.joint === 'head') continue
     const delta = target.time - time
     if (delta < -0.12 || delta > leadSeconds || upcoming.has(target.joint)) continue
     upcoming.set(target.joint, target)
