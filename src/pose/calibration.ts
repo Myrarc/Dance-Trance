@@ -1,5 +1,5 @@
 import type { NormalizedLandmark } from '@mediapipe/tasks-vision'
-import { inPlayerZone, isTPose, playerScreenX } from './gestures.ts'
+import { inPlayerZone, isRightHandRaised, playerScreenX } from './gestures.ts'
 import { LM } from './skeleton.ts'
 
 export type CalibrationIssue = 'missing' | 'zone' | 'body' | 'arms' | 'feet' | 'head' | 'distance' | 'sideways' | 'motion' | 'slow'
@@ -11,9 +11,9 @@ export interface CalibrationPlayer {
   movementFrames: number
   movementGoodFrames: number
   downStreak: number
-  outStreak: number
+  upStreak: number
   sawDown: boolean
-  sawOut: boolean
+  sawUp: boolean
   reason: CalibrationIssue | null
   issues: Partial<Record<CalibrationIssue, number>>
 }
@@ -65,9 +65,9 @@ export function assessCalibrationPose(
   return { reason: null }
 }
 
-function armsDown(pose: NormalizedLandmark[]): boolean {
+function rightArmDown(pose: NormalizedLandmark[]): boolean {
   const hipY = (pose[LM.lHip].y + pose[LM.rHip].y) / 2
-  return pose[LM.lWrist].y > hipY - 0.06 && pose[LM.rWrist].y > hipY - 0.06
+  return pose[LM.rElbow].y > pose[LM.rShoulder].y + 0.03 && pose[LM.rWrist].y > hipY - 0.06
 }
 
 function mostCommonIssue(player: CalibrationPlayer): CalibrationIssue {
@@ -80,7 +80,7 @@ export function beginCalibration(playerCount: 1 | 2, nowMs: number): Calibration
     phase: 'framing', playerCount, startedAt: nowMs, phaseStartedAt: nowMs,
     players: Array.from({ length: playerCount }, () => ({
       frames: 0, goodFrames: 0, movementFrames: 0, movementGoodFrames: 0,
-      downStreak: 0, outStreak: 0, sawDown: false, sawOut: false,
+      downStreak: 0, upStreak: 0, sawDown: false, sawUp: false,
       reason: null, issues: {},
     })),
   }
@@ -105,15 +105,15 @@ export function advanceCalibration(
       if (reason === null && pose) {
         player.movementGoodFrames++
         if (!player.sawDown) {
-          player.downStreak = armsDown(pose) ? player.downStreak + 1 : 0
+          player.downStreak = rightArmDown(pose) ? player.downStreak + 1 : 0
           if (player.downStreak >= 2) player.sawDown = true
-        } else if (!player.sawOut) {
-          player.outStreak = isTPose(pose) ? player.outStreak + 1 : 0
-          if (player.outStreak >= 2) player.sawOut = true
+        } else if (!player.sawUp) {
+          player.upStreak = isRightHandRaised(pose) ? player.upStreak + 1 : 0
+          if (player.upStreak >= 2) player.sawUp = true
         }
       } else {
         player.downStreak = 0
-        player.outStreak = 0
+        player.upStreak = 0
       }
     }
     if (reason) player.issues[reason] = (player.issues[reason] ?? 0) + 1
@@ -132,7 +132,7 @@ export function advanceCalibration(
       })) }
     }
   } else {
-    const good = players.every((player) => player.sawOut &&
+    const good = players.every((player) => player.sawUp &&
       player.movementFrames >= 12 && player.movementGoodFrames / player.movementFrames >= 0.7)
     if (elapsed >= 1000 && good) {
       return { ...state, phase: 'passed', players: players.map((player) => ({ ...player, reason: null })) }
@@ -141,7 +141,7 @@ export function advanceCalibration(
       return { ...state, phase: 'failed', players: players.map((player) => ({
         ...player,
         reason: player.movementGoodFrames / Math.max(1, player.movementFrames) < 0.7
-          ? mostCommonIssue(player) : player.sawOut ? null : 'motion',
+          ? mostCommonIssue(player) : player.sawUp ? null : 'motion',
       })) }
     }
   }

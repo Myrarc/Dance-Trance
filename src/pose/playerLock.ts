@@ -1,5 +1,5 @@
 import type { NormalizedLandmark } from '@mediapipe/tasks-vision'
-import { inPlayerZone, isTPose, playerScreenX } from './gestures.ts'
+import { inPlayerZone, isRightHandRaised, playerScreenX } from './gestures.ts'
 import { LM } from './skeleton.ts'
 
 interface Anchor {
@@ -94,7 +94,7 @@ export function matchPlayerLock(
     }
     const dt = Math.max(0, nowMs - slot.lastSeenAt) / 1000
     const longLoss = nowMs - slot.lastSeenAt > LOST_AFTER_MS
-    if (longLoss && (!isTPose(poses[index]) || !inPlayerZone(playerScreenX(poses[index]) ?? -1, slotIndex, lock.slots.length))) {
+    if (longLoss && (!isRightHandRaised(poses[index]) || !inPlayerZone(playerScreenX(poses[index]) ?? -1, slotIndex, lock.slots.length))) {
       return Infinity
     }
     const predictedX = slot.x + slot.velocityX * Math.min(dt, 0.2)

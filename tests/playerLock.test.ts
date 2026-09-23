@@ -2,17 +2,17 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createPlayerLock, matchPlayerLock, registrationCandidates } from '../src/pose/playerLock.ts'
 
-function pose(center: number, scale = 1, armsOut = true) {
+function pose(center: number, scale = 1, gesture: 'out' | 'down' | 'rightUp' = 'out') {
   const points = Array.from({ length: 33 }, () => ({ x: center, y: 0.5, z: 0, visibility: 1 }))
   const put = (index: number, dx: number, y: number) => { points[index] = { x: center + dx * scale, y: 0.5 + (y - 0.5) * scale, z: 0, visibility: 1 } }
   put(11, -0.07, 0.32)
   put(12, 0.07, 0.32)
   put(23, -0.05, 0.57)
   put(24, 0.05, 0.57)
-  put(13, armsOut ? -0.16 : -0.07, armsOut ? 0.32 : 0.45)
-  put(14, armsOut ? 0.16 : 0.07, armsOut ? 0.32 : 0.45)
-  put(15, armsOut ? -0.21 : -0.07, armsOut ? 0.32 : 0.6)
-  put(16, armsOut ? 0.21 : 0.07, armsOut ? 0.32 : 0.6)
+  put(13, gesture === 'out' ? -0.16 : -0.07, gesture === 'out' ? 0.32 : 0.45)
+  put(14, gesture === 'out' ? 0.16 : 0.07, gesture === 'out' ? 0.32 : gesture === 'rightUp' ? 0.18 : 0.45)
+  put(15, gesture === 'out' ? -0.21 : -0.07, gesture === 'out' ? 0.32 : 0.6)
+  put(16, gesture === 'out' ? 0.21 : 0.07, gesture === 'out' ? 0.32 : gesture === 'rightUp' ? 0.06 : 0.6)
   return points
 }
 
@@ -50,16 +50,20 @@ test('minor lighting changes and unavailable color samples do not break the lock
 test('a lost player is not silently replaced after a long absence', () => {
   let lock = createPlayerLock([pose(0.5)], 0)
   lock = matchPlayerLock(lock, [], 900).state
-  const stranger = matchPlayerLock(lock, [pose(0.5, 1, false)], 950)
+  const stranger = matchPlayerLock(lock, [pose(0.5, 1, 'down')], 950)
   assert.deepEqual(stranger.indices, [null])
-  assert.deepEqual(matchPlayerLock(stranger.state, [pose(0.5, 1, true)], 1000).indices, [null])
+  assert.deepEqual(matchPlayerLock(stranger.state, [pose(0.5, 1, 'rightUp')], 1000).indices, [null])
 })
 
-test('a visible T-pose held after loss deliberately restores the same slot', () => {
+test('only a sustained right-hand-up pose restores a lost player slot', () => {
   let lock = createPlayerLock([pose(0.5)], 0)
   lock = matchPlayerLock(lock, [], 900).state
-  lock = matchPlayerLock(lock, [pose(0.5)], 1000).state
-  const restored = matchPlayerLock(lock, [pose(0.5)], 2100)
+  const oldPose = matchPlayerLock(lock, [pose(0.5)], 1000)
+  assert.deepEqual(oldPose.indices, [null])
+  assert.deepEqual(matchPlayerLock(oldPose.state, [pose(0.5)], 2100).indices, [null])
+  lock = matchPlayerLock(lock, [pose(0.5, 1, 'rightUp')], 1100).state
+  assert.deepEqual(matchPlayerLock(lock, [pose(0.5, 1, 'rightUp')], 1800).indices, [null])
+  const restored = matchPlayerLock(lock, [pose(0.5, 1, 'rightUp')], 2100)
   assert.deepEqual(restored.indices, [0])
 })
 

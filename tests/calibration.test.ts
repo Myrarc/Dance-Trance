@@ -3,7 +3,7 @@ import test from 'node:test'
 import { advanceCalibration, assessCalibrationPose, beginCalibration, canStartWithCalibration } from '../src/pose/calibration.ts'
 import { LM } from '../src/pose/skeleton.ts'
 
-function dancer(center = 0.5, arms: 'out' | 'down' = 'out') {
+function dancer(center = 0.5, arms: 'out' | 'down' | 'rightUp' = 'out') {
   const points = Array.from({ length: 33 }, () => ({ x: center, y: 0.5, z: 0, visibility: 1 }))
   const put = (index: number, dx: number, y: number) => { points[index] = { x: center + dx, y, z: 0, visibility: 1 } }
   put(LM.nose, 0, 0.19)
@@ -20,6 +20,11 @@ function dancer(center = 0.5, arms: 'out' | 'down' = 'out') {
     put(LM.rElbow, 0.16, 0.32)
     put(LM.lWrist, -0.21, 0.32)
     put(LM.rWrist, 0.21, 0.32)
+  } else if (arms === 'rightUp') {
+    put(LM.lElbow, -0.07, 0.45)
+    put(LM.rElbow, 0.07, 0.18)
+    put(LM.lWrist, -0.07, 0.6)
+    put(LM.rWrist, 0.07, 0.06)
   } else {
     put(LM.lElbow, -0.07, 0.45)
     put(LM.rElbow, 0.07, 0.45)
@@ -40,15 +45,35 @@ test('rejects an apparently detected pose when a scoring joint is occluded or of
   assert.equal(assessCalibrationPose(dancer(), 0, 1).reason, null)
 })
 
-test('passes only after reliable framing and an observed down-then-out arm movement', () => {
+test('passes only after reliable framing and an observed right arm down-then-up movement', () => {
   let state = beginCalibration(1, 0)
   for (let time = 0; time <= 2400; time += 50) state = advanceCalibration(state, [dancer()], time)
   assert.equal(state.phase, 'movement')
   for (let time = 2450; time <= 3100; time += 50) state = advanceCalibration(state, [dancer(0.5, 'down')], time)
   assert.equal(state.phase, 'movement')
-  for (let time = 3150; time <= 3900; time += 50) state = advanceCalibration(state, [dancer()], time)
+  for (let time = 3150; time <= 3900; time += 50) state = advanceCalibration(state, [dancer(0.5, 'rightUp')], time)
   assert.equal(state.phase, 'passed')
   assert.equal(state.players[0].goodFrames > 30, true)
+})
+
+test('the old two-arm T-pose does not complete the movement check', () => {
+  let state = beginCalibration(1, 0)
+  for (let time = 0; time <= 2400; time += 50) state = advanceCalibration(state, [dancer()], time)
+  for (let time = 2450; time <= 3100; time += 50) state = advanceCalibration(state, [dancer(0.5, 'down')], time)
+  for (let time = 3150; time <= 10500; time += 50) state = advanceCalibration(state, [dancer()], time)
+  assert.equal(state.phase, 'failed')
+  assert.equal(state.players[0].reason, 'motion')
+})
+
+test('the right arm alone can demonstrate the required down-then-up movement', () => {
+  let state = beginCalibration(1, 0)
+  for (let time = 0; time <= 2400; time += 50) state = advanceCalibration(state, [dancer()], time)
+  const rightDown = dancer(0.5, 'down')
+  rightDown[LM.lElbow].y = 0.32
+  rightDown[LM.lWrist].y = 0.32
+  for (let time = 2450; time <= 3100; time += 50) state = advanceCalibration(state, [rightDown], time)
+  for (let time = 3150; time <= 3900; time += 50) state = advanceCalibration(state, [dancer(0.5, 'rightUp')], time)
+  assert.equal(state.phase, 'passed')
 })
 
 test('fails with a specific finding when detection keeps dropping out', () => {
@@ -73,10 +98,10 @@ test('calibrates two visible players without combining their movement evidence',
   for (let time = 0; time <= 2400; time += 50) state = advanceCalibration(state, [dancer(0.75), dancer(0.25)], time)
   assert.equal(state.phase, 'movement')
   for (let time = 2450; time <= 3100; time += 50) state = advanceCalibration(state, [dancer(0.75, 'down'), dancer(0.25)], time)
-  for (let time = 3150; time <= 3900; time += 50) state = advanceCalibration(state, [dancer(0.75), dancer(0.25)], time)
+  for (let time = 3150; time <= 3900; time += 50) state = advanceCalibration(state, [dancer(0.75, 'rightUp'), dancer(0.25)], time)
   assert.equal(state.phase, 'movement')
   for (let time = 3950; time <= 4600; time += 50) state = advanceCalibration(state, [dancer(0.75), dancer(0.25, 'down')], time)
-  for (let time = 4650; time <= 5400; time += 50) state = advanceCalibration(state, [dancer(0.75), dancer(0.25)], time)
+  for (let time = 4650; time <= 5400; time += 50) state = advanceCalibration(state, [dancer(0.75, 'rightUp'), dancer(0.25, 'rightUp')], time)
   assert.equal(state.phase, 'passed')
 })
 
@@ -94,7 +119,7 @@ test('reports a missing arm movement even when framing stays good', () => {
   assert.equal(state.players[0].reason, 'motion')
 })
 
-test('reports dropout during movement even if both arm positions appeared briefly', () => {
+test('reports dropout during movement even if both right-arm positions appeared briefly', () => {
   let state = beginCalibration(1, 0)
   for (let time = 0; time <= 2400; time += 50) state = advanceCalibration(state, [dancer()], time)
   for (let time = 2450; time <= 10500; time += 50) {

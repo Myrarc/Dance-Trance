@@ -18,14 +18,19 @@ export interface GestureHold {
   candidate: MenuGesture | null
   since: number
   latched: boolean
+  beeps: number
+  lastBeepAt: number
 }
 
 export interface GestureReading extends GestureHold {
   progress: number
+  beep: 1 | 2 | 3 | null
   fired: MenuGesture | null
 }
 
-export const GESTURE_HOLD_MS = 850
+export const GESTURE_HOLD_MS = 900
+const GESTURE_BEEP_GAP_MS = 400
+const GESTURE_BEEP_DURATION_MS = 100
 
 const visible = (point: NormalizedLandmark | undefined) =>
   !!point && (point.visibility ?? 1) >= 0.5
@@ -33,24 +38,23 @@ const visible = (point: NormalizedLandmark | undefined) =>
 const reliableMenuPoint = (point: NormalizedLandmark | undefined) =>
   !!point && (point.visibility ?? 1) >= 0.55
 
-/** A forgiving arms-horizontal pose used only to confirm player registration. */
-export function isTPose(pose: NormalizedLandmark[]) {
+/** Deliberate registration pose: the player's right hand is high, left hand down. */
+export function isRightHandRaised(pose: NormalizedLandmark[]) {
   const points = [LM.lShoulder, LM.rShoulder, LM.lElbow, LM.rElbow, LM.lWrist, LM.rWrist]
   if (!points.every((index) => visible(pose[index]))) return false
 
   const ls = pose[LM.lShoulder]
   const rs = pose[LM.rShoulder]
-  const le = pose[LM.lElbow]
   const re = pose[LM.rElbow]
   const lw = pose[LM.lWrist]
   const rw = pose[LM.rWrist]
   const shoulderWidth = Math.abs(ls.x - rs.x)
-  if (shoulderWidth < 0.08) return false
+  if (shoulderWidth < 0.06) return false
 
-  const horizontal = [le, re, lw, rw].every(
-    (point) => Math.abs(point.y - (ls.y + rs.y) / 2) < shoulderWidth * 0.45,
-  )
-  return horizontal && Math.abs(lw.x - rw.x) > shoulderWidth * 2.1
+  return rw.y < rs.y - shoulderWidth * 0.75 &&
+    re.y < rs.y - shoulderWidth * 0.15 &&
+    rw.y < re.y - shoulderWidth * 0.35 &&
+    lw.y > ls.y + shoulderWidth * 0.35
 }
 
 /** Screen-space centre after the selfie view is mirrored. */
@@ -103,7 +107,7 @@ export function detectMenuGesture(pose: NormalizedLandmark[] | undefined): MenuG
     Math.abs(rightElbow.y - rightShoulder.y) < armYAllowance &&
     (rightWrist.x - rightShoulder.x) * -leftOutward > shoulderWidth * 0.9
 
-  // A T-pose extends both arms and belongs exclusively to player registration.
+  // Both arms out remain neutral for menu navigation.
   if (leftExtended === rightExtended) return null
   return leftExtended ? 'previous' : 'next'
 }
@@ -112,20 +116,37 @@ export function advanceGestureHold(
   state: GestureHold,
   gesture: MenuGesture | null,
   now: number,
-  holdMs = GESTURE_HOLD_MS,
 ): GestureReading {
   if (!gesture) {
-    return { candidate: null, since: 0, latched: false, progress: 0, fired: null }
+    return { candidate: null, since: 0, latched: false, beeps: 0, lastBeepAt: 0, progress: 0, beep: null, fired: null }
   }
   if (state.latched) {
-    return { ...state, progress: 1, fired: null }
+    return { ...state, progress: 1, beep: null, fired: null }
   }
   if (state.candidate !== gesture) {
-    return { candidate: gesture, since: now, latched: false, progress: 0, fired: null }
+    return { candidate: gesture, since: now, latched: false, beeps: 1, lastBeepAt: now, progress: 0, beep: 1, fired: null }
   }
-  const progress = Math.min(1, Math.max(0, (now - state.since) / holdMs))
-  if (progress < 1) return { ...state, progress, fired: null }
-  return { candidate: gesture, since: state.since, latched: true, progress: 1, fired: gesture }
+  const progress = Math.min(1, Math.max(0, (now - state.since) / GESTURE_HOLD_MS))
+  if (state.beeps < 3 && now - state.lastBeepAt >= GESTURE_BEEP_GAP_MS) {
+    const beep = (state.beeps + 1) as 2 | 3
+    return { ...state, beeps: beep, lastBeepAt: now, progress, beep, fired: null }
+  }
+  if (state.beeps === 3 && progress === 1 && now - state.lastBeepAt >= GESTURE_BEEP_DURATION_MS) {
+    return { ...state, latched: true, progress: 1, beep: null, fired: gesture }
+  }
+  return { ...state, progress, beep: null, fired: null }
+}
+
+/** A registration hand raise must be visibly released before it can confirm a menu action. */
+export function advanceGestureFromPose(
+  state: GestureHold,
+  pose: NormalizedLandmark[] | undefined,
+  now: number,
+): GestureReading {
+  if (state.latched && (!pose || isRightHandRaised(pose))) {
+    return { ...state, progress: 1, beep: null, fired: null }
+  }
+  return advanceGestureHold(state, detectMenuGesture(pose), now)
 }
 
 export function gestureLabel(gesture: MenuGesture, context: GestureContext): string {

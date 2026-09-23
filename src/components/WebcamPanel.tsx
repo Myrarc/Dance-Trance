@@ -12,11 +12,10 @@ import { createPlayerLock, matchPlayerLock, registrationCandidates, type ColorSi
 import { CameraRequestTimeoutError, requestCameraStream } from '../lib/cameraStream'
 import Checkup from './Checkup'
 import {
-  advanceGestureHold,
-  detectMenuGesture,
+  advanceGestureFromPose,
   gestureLabel,
   inPlayerZone,
-  isTPose,
+  isRightHandRaised,
   playerScreenX,
   type GestureContext,
   type GestureHold,
@@ -40,8 +39,8 @@ type MirrorMode = 'auto' | 'mirror' | 'direct'
 const READY_HOLD_MS = 1200
 const LIVE_INFERENCE_INTERVAL_MS = 50
 const LIVE_INPUT_WIDTH = 640
-const GESTURE_BEEP_GAP_MS = 400
 const APPEARANCE_SAMPLE_SIZE = 8
+const EMPTY_GESTURE_HOLD: GestureHold = { candidate: null, since: 0, latched: false, beeps: 0, lastBeepAt: 0 }
 
 /** A tiny chest crop helps distinguish dancers without storing or sending camera images. */
 function sampleTorsoColor(input: HTMLCanvasElement, sample: HTMLCanvasElement, pose: NormalizedLandmark[]): ColorSignature | null {
@@ -84,7 +83,7 @@ const CALIBRATION_ADVICE: Record<CalibrationIssue, string> = {
   head: 'Keep your head visible and face the camera.',
   distance: 'Adjust your distance so your whole body fits clearly.',
   sideways: 'Face the camera more directly.',
-  motion: 'Lower both arms, then lift them out to the sides.',
+  motion: 'Lower your right arm, then raise your right hand above your head.',
   slow: 'Tracking is too slow for a reliable check. Close other camera apps.',
 }
 
@@ -93,7 +92,7 @@ interface PlayerSetup {
   detected: boolean[]
   progress: number[]
   inZone: boolean[]
-  tPose: boolean[]
+  rightHandRaised: boolean[]
 }
 import type { TargetPose } from './VideoPanel'
 import { recordSession } from '../playkitClient'
@@ -192,11 +191,10 @@ export default function WebcamPanel({
   registrationPlayersRef.current = registrationPlayers
   const registeredPlayerCountRef = useRef(1)
   const roundsRef = useRef<PlayerRound[]>([newPlayerRound(), newPlayerRound()])
-  const gestureHoldRef = useRef<GestureHold>({ candidate: null, since: 0, latched: false })
+  const gestureHoldRef = useRef<GestureHold>({ ...EMPTY_GESTURE_HOLD })
   const gestureContextRef = useRef(gestureContext)
   const onGestureActionRef = useRef(onGestureAction)
   const audioContextRef = useRef<AudioContext | null>(null)
-  const gestureSequenceRef = useRef(0)
   // Latest reading, so the guided check can sample without its own detector.
   const latestRef = useRef<{ feature: PoseFeature; framing: string[] } | null>(null)
   const lastUiRef = useRef(0)
@@ -229,7 +227,7 @@ export default function WebcamPanel({
     detected: [],
     progress: [],
     inZone: [],
-    tPose: [],
+    rightHandRaised: [],
   })
   const [lobbyReady, setLobbyReady] = useState(false)
   const [gestureFeedback, setGestureFeedback] = useState<{ gesture: MenuGesture | null; progress: number }>({
@@ -248,6 +246,7 @@ export default function WebcamPanel({
     if (!running || (count !== 1 && count !== 2)) return
     const next = beginCalibration(count, performance.now())
     calibrationRef.current = next
+    gestureHoldRef.current = { ...EMPTY_GESTURE_HOLD, candidate: 'confirm', latched: true }
     setCalibration(next)
     onCalibrationChange?.(next)
   }
@@ -261,7 +260,7 @@ export default function WebcamPanel({
     livePlayerCountRef.current = 0
     playerSmoothersRef.current.forEach((smoother) => smoother.reset())
     playerWorldSmoothersRef.current.forEach((smoother) => smoother.reset())
-    gestureHoldRef.current = { candidate: null, since: 0, latched: false }
+    gestureHoldRef.current = { ...EMPTY_GESTURE_HOLD }
     latestRef.current = null
     emaRef.current = null
     lagRef.current = null
@@ -271,7 +270,7 @@ export default function WebcamPanel({
     setCalibration(null)
     setLobbyReady(false)
     setTrackingLost(false)
-    setPlayerSetup({ count: registrationPlayersRef.current, detected: [], progress: [], inZone: [], tPose: [] })
+    setPlayerSetup({ count: registrationPlayersRef.current, detected: [], progress: [], inZone: [], rightHandRaised: [] })
     onCalibrationChange?.(null)
     onLobbyChange?.(false, 0)
   }, [onCalibrationChange, onLobbyChange])
@@ -282,7 +281,7 @@ export default function WebcamPanel({
 
   useEffect(() => {
     if (!gestureHoldRef.current.latched) {
-      gestureHoldRef.current = { candidate: null, since: 0, latched: false }
+      gestureHoldRef.current = { ...EMPTY_GESTURE_HOLD }
     }
     setGestureFeedback({ gesture: null, progress: 0 })
   }, [gestureContext])
@@ -356,7 +355,7 @@ export default function WebcamPanel({
       stableCountRef.current = { count: 0, since: performance.now() }
       playerLockRef.current = null
       lobbyReadyRef.current = false
-      gestureHoldRef.current = { candidate: null, since: 0, latched: false }
+      gestureHoldRef.current = { ...EMPTY_GESTURE_HOLD }
       setLobbyReady(false)
       setRunning(true)
     } catch (e) {
@@ -373,29 +372,20 @@ export default function WebcamPanel({
     }
   }
 
-  const runGestureConfirmation = (gesture: MenuGesture) => {
-    const sequence = ++gestureSequenceRef.current
-    void (async () => {
-      for (let index = 0; index < 3; index++) {
-        if (sequence !== gestureSequenceRef.current) return
-        const audio = audioContextRef.current
-        if (audio) {
-          const oscillator = audio.createOscillator()
-          const gain = audio.createGain()
-          oscillator.type = 'square'
-          oscillator.frequency.value = index === 1 ? 660 : 880
-          gain.gain.setValueAtTime(0.0001, audio.currentTime)
-          gain.gain.exponentialRampToValueAtTime(0.35, audio.currentTime + 0.01)
-          gain.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + 0.1)
-          oscillator.connect(gain)
-          gain.connect(audio.destination)
-          oscillator.start()
-          oscillator.stop(audio.currentTime + 0.11)
-        }
-        if (index < 2) await new Promise((resolve) => window.setTimeout(resolve, GESTURE_BEEP_GAP_MS))
-      }
-      if (sequence === gestureSequenceRef.current) onGestureActionRef.current?.(gesture)
-    })()
+  const playGestureBeep = (step: 1 | 2 | 3) => {
+    const audio = audioContextRef.current
+    if (!audio) return
+    const oscillator = audio.createOscillator()
+    const gain = audio.createGain()
+    oscillator.type = 'square'
+    oscillator.frequency.value = step === 2 ? 660 : 880
+    gain.gain.setValueAtTime(0.0001, audio.currentTime)
+    gain.gain.exponentialRampToValueAtTime(0.35, audio.currentTime + 0.01)
+    gain.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + 0.1)
+    oscillator.connect(gain)
+    gain.connect(audio.destination)
+    oscillator.start()
+    oscillator.stop(audio.currentTime + 0.11)
   }
 
   const stop = () => {
@@ -431,10 +421,10 @@ export default function WebcamPanel({
     playerWorldSmoothersRef.current.forEach((smoother) => smoother.reset())
     readyHoldRef.current = [0, 0]
     lobbyReadyRef.current = false
-    gestureHoldRef.current = { candidate: null, since: 0, latched: false }
+    gestureHoldRef.current = { ...EMPTY_GESTURE_HOLD }
     setRunning(false)
     setLobbyReady(false)
-    setPlayerSetup({ count: registrationPlayersRef.current, detected: [], progress: [], inZone: [], tPose: [] })
+    setPlayerSetup({ count: registrationPlayersRef.current, detected: [], progress: [], inZone: [], rightHandRaised: [] })
     playerLockRef.current = null
     livePlayerCountRef.current = 0
     setTrackingLost(false)
@@ -497,6 +487,9 @@ export default function WebcamPanel({
       const lock = playerLockRef.current
       const registrationIndices = lock ? [] : registrationCandidates(detected.map((player) => player.pose), registrationPlayersRef.current)
       const match = lock ? matchPlayerLock(lock, detected.map((player) => player.pose), frameNow, detected.map((player) => player.appearance)) : null
+      if (lock && match && match.indices[0] !== null && frameNow - lock.slots[0].lastSeenAt > 750) {
+        gestureHoldRef.current = { ...EMPTY_GESTURE_HOLD, candidate: 'confirm', since: frameNow, latched: true }
+      }
       if (match) playerLockRef.current = match.state
       const matched = (match?.indices ?? registrationIndices).map((index) => index === null ? null : detected[index])
       const count = matched.filter(Boolean).length
@@ -514,16 +507,16 @@ export default function WebcamPanel({
         readyHoldRef.current = [0, 0]
       }
 
-      const setup: PlayerSetup = { count: registrationPlayersRef.current, detected: [], progress: [], inZone: [], tPose: [] }
+      const setup: PlayerSetup = { count: registrationPlayersRef.current, detected: [], progress: [], inZone: [], rightHandRaised: [] }
       const poses = players.map((player, index) => {
         const pose = player?.pose
         const inZone = !!player && inPlayerZone(player.x, index, registrationPlayersRef.current)
-        const tPose = !!pose && isTPose(pose)
-        if (!lobbyReadyRef.current && inZone && tPose) readyHoldRef.current[index] ||= frameNow
+        const rightHandRaised = !!pose && isRightHandRaised(pose)
+        if (!lobbyReadyRef.current && inZone && rightHandRaised) readyHoldRef.current[index] ||= frameNow
         else if (!lobbyReadyRef.current) readyHoldRef.current[index] = 0
         setup.detected.push(!!pose)
         setup.inZone.push(inZone)
-        setup.tPose.push(tPose)
+        setup.rightHandRaised.push(rightHandRaised)
         setup.progress.push(
           readyHoldRef.current[index]
             ? Math.min(1, (frameNow - readyHoldRef.current[index]) / READY_HOLD_MS)
@@ -540,6 +533,7 @@ export default function WebcamPanel({
       ) {
         playerLockRef.current = createPlayerLock(matched.map((player) => player!.pose), frameNow,
           matched.map((player) => player!.appearance))
+        gestureHoldRef.current = { ...EMPTY_GESTURE_HOLD, candidate: 'confirm', since: frameNow, latched: true }
         registeredPlayerCountRef.current = registrationPlayersRef.current
         lobbyReadyRef.current = true
         setLobbyReady(true)
@@ -567,16 +561,14 @@ export default function WebcamPanel({
       let gestureReading = {
         ...gestureHoldRef.current,
         progress: gestureHoldRef.current.latched ? 1 : 0,
+        beep: null as 1 | 2 | 3 | null,
         fired: null as MenuGesture | null,
       }
       if (lobbyReadyRef.current && gestureContextRef.current && calibrationRef.current?.phase !== 'framing' && calibrationRef.current?.phase !== 'movement') {
-        gestureReading = advanceGestureHold(
-          gestureHoldRef.current,
-          detectMenuGesture(pose ?? undefined),
-          frameNow,
-        )
+        gestureReading = advanceGestureFromPose(gestureHoldRef.current, pose ?? undefined, frameNow)
         gestureHoldRef.current = gestureReading
-        if (gestureReading.fired) runGestureConfirmation(gestureReading.fired)
+        if (gestureReading.beep) playGestureBeep(gestureReading.beep)
+        if (gestureReading.fired) onGestureActionRef.current?.(gestureReading.fired)
       }
       const target = targetRef.current
       let frameScore: number | null = null
@@ -807,8 +799,8 @@ export default function WebcamPanel({
                 ? T('Step into this area')
                 : !playerSetup.inZone[index]
                   ? T('Move inside the area')
-                  : !playerSetup.tPose[index]
-                    ? T('Hold a T-pose')
+                  : !playerSetup.rightHandRaised[index]
+                    ? T('Right hand up · left hand down')
                     : `${Math.round(progress * 100)}%`
               return (
                 <div key={index} className={`player-zone ${progress >= 1 ? 'ready' : ''}`}>
@@ -838,7 +830,7 @@ export default function WebcamPanel({
         {running && gamePhase === 'lobby' && lobbyReady && calibration && !checking && (
           <div className="calibration-card" role="status" aria-live="polite">
             <strong>{T(calibration.phase === 'framing' ? 'Checking full-body tracking' : calibration.phase === 'movement' ? 'Checking movement tracking' : calibration.phase === 'passed' ? 'Tracking check passed' : 'Tracking needs attention')}</strong>
-            <p>{T(calibration.phase === 'framing' ? 'Stand in your area with your whole body visible.' : calibration.phase === 'movement' ? 'Lower both arms, then lift them out to the sides.' : calibration.phase === 'passed' ? 'Your pose stayed visible and both arm positions were detected.' : 'Adjust your camera setup and try again. You can still play with reduced tracking quality.')}</p>
+            <p>{T(calibration.phase === 'framing' ? 'Stand in your area with your whole body visible.' : calibration.phase === 'movement' ? 'Lower your right arm, then raise your right hand above your head.' : calibration.phase === 'passed' ? 'Your pose stayed visible and your right arm movement was detected.' : 'Adjust your camera setup and try again. You can still play with reduced tracking quality.')}</p>
             {(calibration.phase === 'passed' || calibration.phase === 'failed') && (
               <ul>
                 {calibration.players.map((player, index) => (
@@ -854,7 +846,7 @@ export default function WebcamPanel({
         )}
         {running && lobbyReady && trackingLost && (
           <div className="tracking-lock-warning" role="status">
-            {T('Tracking lost — return to your area and hold a T-pose to relock.')}
+            {T('Tracking lost — return to your area and hold your right hand up to relock.')}
           </div>
         )}
         {import.meta.env.DEV && running && checking && (
@@ -873,7 +865,7 @@ export default function WebcamPanel({
             )}
           </div>
         )}
-        {running && lobbyReady && gestureContext && !checking && (
+        {running && lobbyReady && gestureContext && !checking && calibration?.phase !== 'framing' && calibration?.phase !== 'movement' && (
           <div className={`gesture-command${gestureFeedback.gesture ? '' : ' is-idle'}`} aria-live="polite">
             <strong>{gestureFeedback.gesture ? T(gestureLabel(gestureFeedback.gesture, gestureContext)) : T('Gesture controls ready')}</strong>
             <span>
