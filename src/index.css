@@ -208,7 +208,9 @@ header .sub {
   display: block;
 }
 
-.app.game-screen-active {
+.destination-wrap.game-screen-active {
+  height: 100dvh;
+  min-height: 100dvh;
   max-width: none;
   padding: 0;
   gap: 0;
