@@ -60,9 +60,10 @@ export default function App() {
   const [hitFeedback, setHitFeedback] = useState<{ id: number; grade: Exclude<HitGrade, 'miss'>; target: CueEvent } | null>(null)
   const [gestureSelectedId, setGestureSelectedId] = useState<string | null>(null)
   const [carouselMotion, setCarouselMotion] = useState<{ direction: 'left' | 'right'; turn: number } | null>(null)
+  const [homeSelected, setHomeSelected] = useState(0)
+  const [homeMotion, setHomeMotion] = useState<{ direction: 'left' | 'right'; turn: number } | null>(null)
   const [previewSrc, setPreviewSrc] = useState<{ id: string; url: string } | null>(null)
   const [previewPaused, setPreviewPaused] = useState(false)
-  const [menuLabel, setMenuLabel] = useState('')
   const [filePickerNotice, setFilePickerNotice] = useState(false)
   const [cameraRunning, setCameraRunning] = useState(false)
   const targetRef = useRef<TargetPose>({ feature: null, history: [], time: 0, gameRun: 0, facing: null, sectionId: null })
@@ -76,6 +77,11 @@ export default function App() {
 
   const arcadePhase = navigation.arcadePhase
   const gamePhase: GamePhase = arcadePhase === 'setup' ? 'lobby' : arcadePhase
+
+  useEffect(() => {
+    setHomeMotion(null)
+    if (navigation.screen === 'home') setHomeSelected(0)
+  }, [navigation.screen])
 
   const go = (type: 'openHome' | 'openArcade' | 'openPractice' | 'openLibrary' | 'openSettings') => {
     playSfx('menu', settings.soundMuted)
@@ -410,6 +416,17 @@ export default function App() {
     setCarouselMotion((motion) => ({ direction, turn: (motion?.turn ?? 0) + 1 }))
     setGestureSelectedId(library[(index + (direction === 'left' ? -1 : 1) + library.length) % library.length].id)
   }
+  const moveHome = (direction: 'left' | 'right') => {
+    setHomeMotion((motion) => ({ direction, turn: (motion?.turn ?? 0) + 1 }))
+    setHomeSelected((index) => (index + (direction === 'left' ? 4 : 1)) % 5)
+  }
+  const selectHome = () => {
+    if (homeSelected === 0) go('openArcade')
+    else if (homeSelected === 1) go('openPractice')
+    else if (homeSelected === 2) go('openLibrary')
+    else if (homeSelected === 3) go('openSettings')
+    else dispatch({ type: 'wake' })
+  }
   const gestureContext: GestureContext | null = lobby.ready && navigation.screen !== 'tracking' &&
     navigation.screen !== 'attract' && !(activeScreen === 'arcade' && src && arcadePhase !== 'results') ? pickingSong ? 'songPicker' : 'menu' : null
   const hasTrack = !!track
@@ -428,11 +445,10 @@ export default function App() {
     item.setAttribute('data-selection-label', L('SELECTED', '已选择'))
     item.focus({ preventScroll: true })
     if (!item.closest('.song-carousel')) item.scrollIntoView({ block: 'nearest', inline: 'nearest' })
-    setMenuLabel(item.getAttribute('data-gesture-label') ?? item.getAttribute('aria-label') ?? item.innerText?.trim().replace(/\s+/g, ' ').slice(0, 55) ?? '')
   }
 
   useEffect(() => {
-    if (!gestureContext) return
+    if (!gestureContext || navigation.screen === 'home') return
     const frame = requestAnimationFrame(() => {
       const items = menuItems()
       const first = (pickingSong ? items.find((item) => item.getAttribute('data-track-id') === previewEntry?.id) : null) ??
@@ -455,6 +471,11 @@ export default function App() {
       else if (activeScreen === 'arcade' && arcadePhase === 'results') chooseSong()
       else if (navigation.screen === 'home') dispatch({ type: 'quitHome' })
       else dispatch({ type: 'openHome' })
+      return
+    }
+    if (navigation.screen === 'home') {
+      if (gesture === 'confirm') selectHome()
+      else moveHome(gesture === 'previous' ? 'left' : 'right')
       return
     }
     if (pickingSong && previewEntry) {
@@ -512,7 +533,7 @@ export default function App() {
         </div> : <p className="library-empty">{T('Your prepared songs will appear here.')}</p>}
         {previewPaused && previewSrc?.id === previewEntry?.id && <button className="btn primary preview-play" onClick={() => { void previewRef.current?.play() }}>{L('Play preview', '播放预览')}</button>}
       </div>
-      <div className="picker-import"><button className="btn primary" data-needs-file onClick={() => openFilePicker(destination)}>{L('+ Add a video', '+ 添加视频')}</button><span>{L('Drop a dance video here, or choose one to play.', '将舞蹈视频拖到这里，或选择一个开始游戏。')}</span></div>
+      <div className="picker-import"><button className="btn primary" data-needs-file onClick={() => openFilePicker(destination)}>{L('+ Add a video', '+ 添加视频')}</button><span className={filePickerNotice ? 'is-notice' : undefined} role={filePickerNotice ? 'status' : undefined}>{filePickerNotice ? L('Use the device to choose a video file.', '请用设备选择视频文件。') : L('Drop a dance video here, or choose one to play.', '将舞蹈视频拖到这里，或选择一个开始游戏。')}</span></div>
     </section>
   )
 
@@ -554,7 +575,7 @@ export default function App() {
 
   const renderPractice = () => <div className="destination-wrap" data-gesture-surface>{renderHeader('Practice Studio')}{renderPanels('practice')}{src && <footer className="practice-legend"><span className="legend-group"><span className="legend-title">{T('Reference')}</span><span className="legend-item"><i style={{ background: SIDE_COLORS.left }} /> {T("dancer's left")}</span><span className="legend-item"><i style={{ background: SIDE_COLORS.right }} /> {T("dancer's right")}</span></span><span className="legend-group"><span className="legend-title">{T('You')}</span><span className="legend-item"><i style={{ background: LEVEL_COLORS.ok }} /> {T('matching')}</span><span className="legend-item"><i style={{ background: LEVEL_COLORS.warn }} /> {T('a bit off')}</span><span className="legend-item"><i style={{ background: LEVEL_COLORS.bad }} /> {T('way off')}</span></span></footer>}</div>
 
-  const renderLibrary = () => <div className="destination-wrap">{renderHeader('Library')}<main className="destination-screen library-screen" data-gesture-surface><div className="screen-title-row"><h1>{L('Your songs', '你的歌曲')}</h1><button className="btn primary" data-needs-file onClick={() => openFilePicker('arcade')}>{T('Add a dance')}</button></div><Library entries={library} stats={stats} records={records} currentId={currentId} selectedId={gestureSelectedId} onPreview={(entry) => setGestureSelectedId(entry.id)} onOpen={(entry) => void openEntry(entry)} onForget={(entry) => void forgetEntry(entry)} emptyHint={T('No songs yet. Add a dance video to build your library.')} /></main></div>
+  const renderLibrary = () => <div className="destination-wrap">{renderHeader('Library')}<main className="destination-screen library-screen" data-gesture-surface><div className="screen-title-row"><h1>{L('Your songs', '你的歌曲')}</h1><button className="btn primary" data-needs-file onClick={() => openFilePicker('arcade')}>{T('Add a dance')}</button></div>{filePickerNotice && <p className="file-picker-notice" role="status">{L('Use the device to choose a video file.', '请用设备选择视频文件。')}</p>}<Library entries={library} stats={stats} records={records} currentId={currentId} selectedId={gestureSelectedId} onPreview={(entry) => setGestureSelectedId(entry.id)} onOpen={(entry) => void openEntry(entry)} onForget={(entry) => void forgetEntry(entry)} emptyHint={T('No songs yet. Add a dance video to build your library.')} /></main></div>
 
   useLangTick()
   return (
@@ -591,7 +612,7 @@ export default function App() {
         </div>
         <button className="btn subtle tracking-back" onClick={() => dispatch({ type: 'openHome' })}>{L('Back to menu', '返回菜单')}</button>
       </main>}
-      {activeScreen === 'home' && <HomeScreen libraryCount={library.length} trackingReady={lobby.ready} onArcade={() => go('openArcade')} onPractice={() => go('openPractice')} onLibrary={() => go('openLibrary')} onSettings={() => go('openSettings')} onTracking={() => dispatch({ type: 'wake' })} account={<AccountBar />} />}
+      {activeScreen === 'home' && <HomeScreen libraryCount={library.length} trackingReady={lobby.ready} selected={homeSelected} motion={homeMotion} onMove={moveHome} onSelect={selectHome} account={<AccountBar />} />}
       {activeScreen === 'arcade' && renderArcade()}
       {activeScreen === 'practice' && renderPractice()}
       {activeScreen === 'library' && renderLibrary()}
@@ -599,7 +620,6 @@ export default function App() {
         <WebcamPanel targetRef={targetRef} videoId={current?.id} videoName={current?.name} onSectionPractice={(deltas) => void recordSectionPractice(deltas)} focus={focus} onFocusChange={setFocus} showSkeletons={settings.showSkeletons} trackHead={settings.trackHead} gamePhase={activeScreen === 'arcade' ? gamePhase : 'lobby'} gameRun={gameRun} onLobbyChange={updateLobby} onGameScores={updateGameScores} onHit={showHit} onScoreDebug={import.meta.env.DEV ? updateScoreDebug : undefined} registrationPlayers={registrationPlayers} onRegistrationPlayersChange={activeScreen === 'practice' ? setRegistrationPlayers : undefined} gestureContext={gestureContext} onGestureAction={handleGestureAction} onRunningChange={setCameraRunning} />
       </div></Suspense>}
       {navigation.screen === 'settings' && <SettingsScreen settings={settings} onChange={updateSettings} onClose={() => dispatch({ type: 'closeSettings' })} />}
-      {gestureContext && <div className="menu-gesture-hud" aria-live="polite"><b>{L('MOVE TO CHOOSE', '移动手臂选择')}</b><span>{filePickerNotice ? L('Use the device to choose a video file.', '请用设备选择视频文件。') : menuLabel || L('Choose an option', '选择选项')}</span><small>{pickingSong ? L('Left arm out: previous · Right arm out: next · Right hand up: play · Left hand up: back', '左臂平伸：上一首 · 右臂平伸：下一首 · 举右手：开始 · 举左手：返回') : L('Left arm out: previous · Right arm out: next · Right hand up: select · Left hand up: back', '左臂平伸：上一个 · 右臂平伸：下一个 · 举右手：选择 · 举左手：返回')}</small></div>}
     </div>
   )
 }

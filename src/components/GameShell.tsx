@@ -40,23 +40,6 @@ function useModalFocus(ref: RefObject<HTMLElement | null>) {
   }, [ref])
 }
 
-function ModeCard({ eyebrow, title, body, action, tone = '' }: {
-  eyebrow: string
-  title: string
-  body: string
-  action: () => void
-  tone?: string
-}) {
-  return (
-    <button className={`mode-card ${tone}`} data-gesture-label={T(title)} onClick={action}>
-      <span>{T(eyebrow)}</span>
-      <strong>{T(title)}</strong>
-      <small>{T(body)}</small>
-      <i aria-hidden="true">↗</i>
-    </button>
-  )
-}
-
 export function Brand({ compact = false }: { compact?: boolean }) {
   return (
     <div className={`brand-lockup${compact ? ' compact' : ''}`} aria-label="Dance Trance">
@@ -66,21 +49,32 @@ export function Brand({ compact = false }: { compact?: boolean }) {
   )
 }
 
-export function HomeScreen({ libraryCount, trackingReady, onArcade, onPractice, onLibrary, onSettings, onTracking, account }: {
+export function HomeScreen({ libraryCount, trackingReady, selected, motion, onMove, onSelect, account }: {
   libraryCount: number
   trackingReady: boolean
-  onArcade: () => void
-  onPractice: () => void
-  onLibrary: () => void
-  onSettings: () => void
-  onTracking: () => void
+  selected: number
+  motion: { direction: 'left' | 'right'; turn: number } | null
+  onMove: (direction: 'left' | 'right') => void
+  onSelect: () => void
   account: ReactNode
 }) {
-  const playRef = useRef<HTMLButtonElement>(null)
-  useEffect(() => playRef.current?.focus(), [])
+  const centerRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => centerRef.current?.focus({ preventScroll: true }), [selected])
+  const options = [
+    { eyebrow: T('Your dance, your game'), title: T('Play'), body: T('Turn a song into an arcade round.'), tone: 'yellow' },
+    { eyebrow: T('Learn the routine'), title: T('Practice Studio'), body: T('Loop, slow down, and focus on the parts that need work.'), tone: 'cyan' },
+    { eyebrow: L(`${libraryCount} saved tracks`, `已保存 ${libraryCount} 首歌曲`), title: T('Library'), body: T('Pick up a prepared song or bring in a new dance video.'), tone: 'yellow' },
+    { eyebrow: T('Make it yours'), title: T('Settings'), body: T('Adjust tracking overlays, sound, language, and motion.'), tone: 'cream' },
+    { eyebrow: T('Get back in frame'), title: T('Camera setup'), body: T('Reconnect tracking and register players again.'), tone: 'cyan' },
+  ]
 
   return (
-    <main className="home-screen" data-gesture-surface>
+    <main className="home-screen" data-gesture-surface onKeyDown={(event) => {
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+        event.preventDefault()
+        onMove(event.key === 'ArrowLeft' ? 'left' : 'right')
+      }
+    }}>
       <div className="home-topline">
         <Brand />
         <div className="home-account" data-gesture-skip>{account}</div>
@@ -90,17 +84,33 @@ export function HomeScreen({ libraryCount, trackingReady, onArcade, onPractice, 
           <span className="kicker">{T(trackingReady ? 'Gesture controls ready' : 'Camera setup needed for gestures')}</span>
           <h1>{T('Choose your game.')}</h1>
           <p>{T(trackingReady ? 'Move through the menu with your arms, then raise your right hand to choose.' : 'Use the buttons or open Camera setup to enable gesture controls.')}</p>
-          <button ref={playRef} className="btn primary home-play" data-gesture-default onClick={onArcade}>
-            <span>{T('Play Arcade')}</span><b aria-hidden="true">▶</b>
-          </button>
         </div>
       </section>
-      <nav className="mode-grid" aria-label={T('Game modes')}>
-        <ModeCard eyebrow="Learn the routine" title="Practice Studio" body="Loop, slow down, and focus on the parts that need work." action={onPractice} tone="cyan" />
-        <ModeCard eyebrow={`${libraryCount} saved tracks`} title="Library" body="Pick up a prepared song or bring in a new dance video." action={onLibrary} tone="yellow" />
-        <ModeCard eyebrow="Make it yours" title="Settings" body="Adjust tracking overlays, sound, language, and motion." action={onSettings} tone="cream" />
-        <ModeCard eyebrow="Get back in frame" title="Camera setup" body="Reconnect tracking and register players again." action={onTracking} tone="cyan" />
+      <nav key={motion?.turn ?? 0} className={`song-carousel home-carousel${motion ? ` is-moving-${motion.direction}` : ''}`} aria-label={T('Game modes')}>
+        {([-1, 0, 1] as const).map((offset) => {
+          const index = (selected + offset + options.length) % options.length
+          const option = options[index]
+          const position = offset === -1 ? 'left' : offset === 1 ? 'right' : 'center'
+          return <button
+            key={index}
+            ref={offset === 0 ? centerRef : undefined}
+            className={`song-card song-card-${position} home-card home-card-${option.tone}`}
+            aria-current={offset === 0 ? 'true' : undefined}
+            aria-label={option.title}
+            onClick={() => offset === 0 ? onSelect() : onMove(offset === -1 ? 'left' : 'right')}
+          >
+            <span className="home-card-eyebrow">{option.eyebrow}</span>
+            <strong>{option.title}</strong>
+            <small>{option.body}</small>
+            <i aria-hidden="true">{offset === 0 ? '▶' : offset === -1 ? '←' : '→'}</i>
+          </button>
+        })}
       </nav>
+      <div className="home-mobile-controls">
+        <button className="btn" onClick={() => onMove('left')}>{L('← Previous', '← 上一个')}</button>
+        <button className="btn" onClick={() => onMove('right')}>{L('Next →', '下一个 →')}</button>
+      </div>
+      <p className="home-navigation-hint">{L('← Previous · Next → · Right hand up or Enter to choose', '← 上一个 · 下一个 → · 举右手或按 Enter 选择')}</p>
     </main>
   )
 }
