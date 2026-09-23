@@ -240,9 +240,8 @@ export default function WebcamPanel({
     rightHandRaised: [],
   })
   const [lobbyReady, setLobbyReady] = useState(false)
-  const [gestureFeedback, setGestureFeedback] = useState<{ gesture: MenuGesture | null; progress: number; beeps: number; latched: boolean }>({
+  const [gestureFeedback, setGestureFeedback] = useState<{ gesture: MenuGesture | null; beeps: number; latched: boolean }>({
     gesture: null,
-    progress: 0,
     beeps: 0,
     latched: false,
   })
@@ -299,7 +298,7 @@ export default function WebcamPanel({
     if (!gestureHoldRef.current.latched) {
       gestureHoldRef.current = { ...EMPTY_GESTURE_HOLD }
     }
-    setGestureFeedback({ gesture: null, progress: 0, beeps: 0, latched: false })
+    setGestureFeedback({ gesture: null, beeps: 0, latched: false })
   }, [gestureContext])
 
   useEffect(() => {
@@ -760,7 +759,7 @@ export default function WebcamPanel({
           setCalibration(calibrationRef.current)
         }
         onLobbyChange?.(lobbyReadyRef.current, count)
-        setGestureFeedback({ gesture: gestureReading.candidate, progress: gestureReading.progress, beeps: gestureReading.beeps, latched: gestureReading.latched })
+        setGestureFeedback({ gesture: gestureReading.candidate, beeps: gestureReading.beeps, latched: gestureReading.latched })
         setPauseProgress(pauseReading.progress)
       }
       if (frameNow - lastMetricsAt >= 1000) {
@@ -974,8 +973,7 @@ export default function WebcamPanel({
           <div><span className="gesture-cue-pose">{gesturePose}</span><strong aria-live="polite">{T(gestureLabel(activeGesture, gestureContext))}</strong></div>
           <b className="gesture-cue-count" aria-hidden="true">{gestureFeedback.beeps}<small>/ 3</small></b>
         </div>
-        <div className="gesture-cue-steps" aria-hidden="true">{[1, 2, 3].map((step) => <i key={step} className={step <= gestureFeedback.beeps ? 'is-lit' : ''} />)}</div>
-        <div className="gesture-cue-track" role="progressbar" aria-label={L('Gesture hold', '手势保持进度')} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(gestureFeedback.progress * 100)}><i style={{ width: `${gestureFeedback.progress * 100}%` }} /></div>
+        <div className="gesture-cue-steps" role="progressbar" aria-label={L('Gesture confirmation', '手势确认进度')} aria-valuemin={0} aria-valuemax={3} aria-valuenow={gestureFeedback.beeps}>{[1, 2, 3].map((step) => <i key={step} className={step <= gestureFeedback.beeps ? 'is-lit' : ''} />)}</div>
         <p>{gestureFeedback.latched
           ? activeGesture === 'previous' || activeGesture === 'next'
             ? L('Keep holding to browse · lower to stop', '保持姿势继续浏览 · 放下即停止')
