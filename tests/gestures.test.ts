@@ -8,14 +8,15 @@ import {
   detectMenuGesture,
   gestureLabel,
   inPlayerZone,
+  isCrossedArms,
   isRightHandRaised,
   playerScreenX,
   type GestureHold,
 } from '../src/pose/gestures.ts'
 
 test('song picker labels match its circular left and right browsing', () => {
-  assert.equal(gestureLabel('previous', 'songPicker'), 'Next song')
-  assert.equal(gestureLabel('next', 'songPicker'), 'Previous song')
+  assert.equal(gestureLabel('previous', 'songPicker'), 'Previous song')
+  assert.equal(gestureLabel('next', 'songPicker'), 'Next song')
 })
 
 test('a held still cross pauses once and moving or releasing cancels it', () => {
@@ -86,6 +87,14 @@ test('recognises deliberate menu poses without treating both arms out as navigat
   Object.assign(p[14], { x: 0.61, y: 0.58 })
   Object.assign(p[16], { x: 0.61, y: 0.7 })
   assert.equal(detectMenuGesture(p), 'previous')
+  assert.equal(detectMenuGesture(p.map((point) => ({ ...point, x: 1 - point.x }))), 'previous')
+
+  Object.assign(p[13], { x: 0.42, y: 0.58 })
+  Object.assign(p[15], { x: 0.43, y: 0.7 })
+  Object.assign(p[14], { x: 0.72, y: 0.45 })
+  Object.assign(p[16], { x: 0.85, y: 0.45 })
+  assert.equal(detectMenuGesture(p), 'next')
+  assert.equal(detectMenuGesture(p.map((point) => ({ ...point, x: 1 - point.x }))), 'next')
 
   Object.assign(p[13], { x: 0.42, y: 0.58 })
   Object.assign(p[15], { x: 0.43, y: 0.7 })
@@ -96,6 +105,17 @@ test('recognises deliberate menu poses without treating both arms out as navigat
   Object.assign(p[13], { x: 0.42, y: 0.35 })
   Object.assign(p[15], { x: 0.43, y: 0.18 })
   assert.equal(detectMenuGesture(p), null)
+
+  Object.assign(p[14], { x: 0.61, y: 0.58 })
+  Object.assign(p[16], { x: 0.61, y: 0.7 })
+  assert.equal(detectMenuGesture(p), 'back')
+  assert.equal(isCrossedArms(p), false)
+
+  Object.assign(p[13], { x: 0.48, y: 0.5 })
+  Object.assign(p[15], { x: 0.6, y: 0.45 })
+  Object.assign(p[14], { x: 0.52, y: 0.5 })
+  Object.assign(p[16], { x: 0.4, y: 0.45 })
+  assert.equal(isCrossedArms(p), true)
 })
 
 test('three live beeps precede navigation, then a held pose repeats at a controlled rate', () => {

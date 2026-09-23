@@ -14,9 +14,9 @@ import Checkup from './Checkup'
 import {
   advanceGestureFromPose,
   advancePauseHold,
-  detectMenuGesture,
   gestureLabel,
   inPlayerZone,
+  isCrossedArms,
   isRightHandRaised,
   playerScreenX,
   type GestureContext,
@@ -568,7 +568,7 @@ export default function WebcamPanel({
       const pose = poses[0]
       const world = players[0]?.world
       const pauseReading = advancePauseHold(pauseHoldRef.current,
-        gamePhase === 'playing' && lobbyReadyRef.current && !!pose && detectMenuGesture(pose) === 'back',
+        gamePhase === 'playing' && lobbyReadyRef.current && isCrossedArms(pose),
         pose ? playerScreenX(pose) : null, frameNow)
       pauseHoldRef.current = pauseReading.hold
       if (pauseReading.fired) {
@@ -901,7 +901,7 @@ export default function WebcamPanel({
                     ? L('Keep holding to browse · lower to stop', '保持姿势继续浏览 · 放下即停止')
                     : T('Return to neutral')
                   : T('Hold steady')
-                : gestureContext === 'results' ? T('Right hand: replay · cross arms: songs') : T('Make a navigation gesture')}
+                : gestureContext === 'results' ? T('Right hand up: replay · left hand up: songs') : T('Make a navigation gesture')}
             </span>
             <i style={{ transform: `scaleX(${gestureFeedback.progress})` }} />
           </div>

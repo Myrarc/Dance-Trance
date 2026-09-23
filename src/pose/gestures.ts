@@ -74,6 +74,16 @@ export function inPlayerZone(screenX: number, playerIndex: number, playerCount: 
   return playerIndex === 0 ? screenX >= 0.05 && screenX <= 0.45 : screenX >= 0.55 && screenX <= 0.95
 }
 
+export function isCrossedArms(pose: NormalizedLandmark[] | null | undefined): boolean {
+  if (!pose) return false
+  const [leftShoulder, rightShoulder, leftWrist, rightWrist] = [pose[11], pose[12], pose[15], pose[16]]
+  if (![leftShoulder, rightShoulder, leftWrist, rightWrist].every(reliableMenuPoint)) return false
+  const shoulderWidth = Math.abs(leftShoulder.x - rightShoulder.x)
+  return shoulderWidth >= 0.06 &&
+    Math.hypot(leftWrist.x - rightShoulder.x, leftWrist.y - rightShoulder.y) < shoulderWidth * 0.62 &&
+    Math.hypot(rightWrist.x - leftShoulder.x, rightWrist.y - leftShoulder.y) < shoulderWidth * 0.62
+}
+
 /** Static menu poses are intentionally scale-relative and require visible arm joints. */
 export function detectMenuGesture(pose: NormalizedLandmark[] | undefined): MenuGesture | null {
   if (!pose) return null
@@ -95,11 +105,9 @@ export function detectMenuGesture(pose: NormalizedLandmark[] | undefined): MenuG
   const leftHandUp = leftWrist.y < nose.y && leftElbow.y < shoulderY
   const rightHandUp = rightWrist.y < nose.y && rightElbow.y < shoulderY
   if (rightHandUp && !leftHandUp) return 'confirm'
+  if (leftHandUp && !rightHandUp) return 'back'
 
-  const crossed =
-    Math.hypot(leftWrist.x - rightShoulder.x, leftWrist.y - rightShoulder.y) < shoulderWidth * 0.62 &&
-    Math.hypot(rightWrist.x - leftShoulder.x, rightWrist.y - leftShoulder.y) < shoulderWidth * 0.62
-  if (crossed) return 'back'
+  if (isCrossedArms(pose)) return 'back'
 
   const leftExtended =
     Math.abs(leftWrist.y - leftShoulder.y) < armYAllowance &&
@@ -168,8 +176,8 @@ export function advancePauseHold(hold: PauseHold, crossed: boolean, center: numb
 
 export function gestureLabel(gesture: MenuGesture, context: GestureContext): string {
   if (context === 'songPicker') {
-    if (gesture === 'previous') return 'Next song'
-    if (gesture === 'next') return 'Previous song'
+    if (gesture === 'previous') return 'Previous song'
+    if (gesture === 'next') return 'Next song'
     if (gesture === 'back') return 'Go back'
     return 'Play selected song'
   }

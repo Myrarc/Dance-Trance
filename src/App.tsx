@@ -450,7 +450,7 @@ export default function App() {
       if (gesture === 'confirm') void openEntry(previewEntry, activeScreen)
       else {
         const index = library.findIndex((entry) => entry.id === previewEntry.id)
-        setGestureSelectedId(library[(index + (gesture === 'previous' ? 1 : -1) + library.length) % library.length].id)
+        setGestureSelectedId(library[(index + (gesture === 'previous' ? -1 : 1) + library.length) % library.length].id)
       }
       return
     }
@@ -478,7 +478,7 @@ export default function App() {
       onDragOver={(event) => { event.preventDefault(); setDragOver(true) }}
       onDragLeave={() => setDragOver(false)}
       onDrop={(event) => { event.preventDefault(); setDragOver(false); void loadFile(event.dataTransfer.files?.[0], destination) }}>
-      <div className="picker-heading"><h1>{L(destination === 'arcade' ? 'Select your track' : 'Select a routine', destination === 'arcade' ? '选择歌曲' : '选择练习')}</h1><p>{L('Left arm: next song · Right arm: previous song · Raise your right hand to play.', '左臂：下一首 · 右臂：上一首 · 举起右手开始。')}</p></div>
+      <div className="picker-heading"><h1>{L(destination === 'arcade' ? 'Select your track' : 'Select a routine', destination === 'arcade' ? '选择歌曲' : '选择练习')}</h1><p>{L('Left arm out: previous song · Right arm out: next song · Right hand up: play · Left hand up: back', '左臂平伸：上一首 · 右臂平伸：下一首 · 举右手：开始 · 举左手：返回')}</p></div>
       <div className="picker-stage">
         {library.length ? <div className="song-carousel" role="group" aria-label={L('Song picker', '歌曲选择')}>
           {([library.length > 1 ? library[(library.findIndex((entry) => entry.id === previewEntry.id) - 1 + library.length) % library.length] : null, previewEntry, library.length > 2 ? library[(library.findIndex((entry) => entry.id === previewEntry.id) + 1) % library.length] : null] as const).map((entry, slot) => entry ? <button
@@ -587,7 +587,7 @@ export default function App() {
         <WebcamPanel targetRef={targetRef} videoId={current?.id} videoName={current?.name} onSectionPractice={(deltas) => void recordSectionPractice(deltas)} focus={focus} onFocusChange={setFocus} showSkeletons={settings.showSkeletons} trackHead={settings.trackHead} gamePhase={activeScreen === 'arcade' ? gamePhase : 'lobby'} gameRun={gameRun} onLobbyChange={updateLobby} onGameScores={updateGameScores} onHit={showHit} onScoreDebug={import.meta.env.DEV ? updateScoreDebug : undefined} requireCalibration={activeScreen === 'arcade' && arcadePhase === 'registration'} registrationPlayers={registrationPlayers} onRegistrationPlayersChange={activeScreen === 'practice' ? setRegistrationPlayers : undefined} onCalibrationChange={updateCalibration} gestureContext={gestureContext} onGestureAction={handleGestureAction} onRunningChange={setCameraRunning} />
       </div></Suspense>}
       {navigation.screen === 'settings' && <SettingsScreen settings={settings} onChange={updateSettings} onClose={() => dispatch({ type: 'closeSettings' })} />}
-      {gestureContext && <div className="menu-gesture-hud" aria-live="polite"><b>{L('MOVE TO CHOOSE', '移动手臂选择')}</b><span>{filePickerNotice ? L('Use the device to choose a video file.', '请用设备选择视频文件。') : menuLabel || L('Choose an option', '选择选项')}</span><small>{pickingSong ? L('Left arm: next song · Right arm: previous song · Right hand up: play · Cross arms: back', '左臂：下一首 · 右臂：上一首 · 右手举起：开始 · 交叉双臂：返回') : L('Left arm: previous · Right arm: next · Right hand up: select · Cross arms: back', '左臂：上一个 · 右臂：下一个 · 右手举起：选择 · 交叉双臂：返回')}</small></div>}
+      {gestureContext && <div className="menu-gesture-hud" aria-live="polite"><b>{L('MOVE TO CHOOSE', '移动手臂选择')}</b><span>{filePickerNotice ? L('Use the device to choose a video file.', '请用设备选择视频文件。') : menuLabel || L('Choose an option', '选择选项')}</span><small>{pickingSong ? L('Left arm out: previous · Right arm out: next · Right hand up: play · Left hand up: back', '左臂平伸：上一首 · 右臂平伸：下一首 · 举右手：开始 · 举左手：返回') : L('Left arm out: previous · Right arm out: next · Right hand up: select · Left hand up: back', '左臂平伸：上一个 · 右臂平伸：下一个 · 举右手：选择 · 举左手：返回')}</small></div>}
     </div>
   )
 }

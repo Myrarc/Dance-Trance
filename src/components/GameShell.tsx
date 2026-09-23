@@ -264,7 +264,7 @@ export function ResultsScreen({ players, difficulty, records, reducedEffects, on
         <button className="btn" onClick={onChooseSong}>{T('Choose another song')}</button>
         <button className="btn subtle" onClick={onHome}>{T('Home')}</button>
       </div>
-      <p className="gesture-hint">{T('Right hand up to replay · cross arms to choose a song')}</p>
+      <p className="gesture-hint">{T('Right hand up to replay · left hand up to choose a song')}</p>
     </section>
   )
 }
