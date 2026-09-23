@@ -18,7 +18,7 @@ import {
   loadArcadeRecords, loadLibraryIndex, loadSessions, onAuthChange, statsByVideo,
   syncArcadeRecords, syncLibrary, type VideoStats,
 } from './playkitClient'
-import { loadGameSettings, saveGameSettings, type GameSettings } from './lib/gameSettings'
+import { MENU_THEMES, loadGameSettings, saveGameSettings, type GameSettings } from './lib/gameSettings'
 import { playSfx } from './lib/sfx'
 import { accuracy, type GamePhase, type HitGrade, type PlayerRound } from './pose/gameplay'
 import type { CueEvent, Difficulty } from './pose/hitTargets'
@@ -30,6 +30,23 @@ const VideoPanel = lazy(() => import('./components/VideoPanel'))
 const WebcamPanel = lazy(() => import('./components/WebcamPanel'))
 
 const DIFFICULTIES: Difficulty[] = ['easy', 'normal', 'hard']
+const MENU_MUSIC_VOLUME = 0.4
+const PREVIEW_VOLUME = 0.55
+const AUDIO_FADE_MS = 500
+
+function fadeVolume(audio: HTMLMediaElement, target: number, done?: () => void) {
+  const start = audio.volume
+  const startedAt = performance.now()
+  let frame = 0
+  const step = (now: number) => {
+    const progress = Math.max(0, Math.min(1, (now - startedAt) / AUDIO_FADE_MS))
+    audio.volume = start + (target - start) * progress
+    if (progress < 1) frame = requestAnimationFrame(step)
+    else done?.()
+  }
+  frame = requestAnimationFrame(step)
+  return () => cancelAnimationFrame(frame)
+}
 
 function LoadingStage() {
   return <div className="loading-stage" role="status">{T('Loading the dance floor…')}</div>
@@ -75,6 +92,10 @@ export default function App() {
   const comboMilestonesRef = useRef<number[]>([])
   const previewRef = useRef<HTMLVideoElement>(null)
   const previewStartRef = useRef(0)
+  const selectedPreviewTimeRef = useRef(0)
+  const menuMusicRef = useRef<HTMLAudioElement>(null)
+  const difficultyPreviewRef = useRef<HTMLAudioElement>(null)
+  const difficultyPreviewStartRef = useRef(0)
   const wasLobbyReadyRef = useRef(false)
 
   const arcadePhase = navigation.arcadePhase
@@ -355,6 +376,7 @@ export default function App() {
   const loadFile = async (file: File | undefined | null, destination: AppScreen = 'arcade') => {
     if (!file) return
     if (!file.type.startsWith('video/')) return alert(T('Please choose a video file'))
+    selectedPreviewTimeRef.current = 0
     setTrack(null)
     play(file)
     const entry = await remember(file)
@@ -380,6 +402,7 @@ export default function App() {
       fileInputRef.current?.click()
       return
     }
+    selectedPreviewTimeRef.current = previewSrc?.id === entry.id ? previewRef.current?.currentTime ?? 0 : 0
     setTrack(null)
     play(blob)
     setCurrent(entry)
@@ -426,6 +449,30 @@ export default function App() {
   }
 
   const pickingSong = !src && navigation.screen !== 'settings' && (activeScreen === 'arcade' || activeScreen === 'practice')
+  const menuMusicActive = !pickingSong && (navigation.screen === 'attract' || !src || (activeScreen === 'arcade' && arcadePhase === 'results') || (activeScreen !== 'arcade' && activeScreen !== 'practice'))
+  const menuTheme = MENU_THEMES.find((theme) => theme.id === settings.menuTheme)
+  useEffect(() => {
+    const audio = menuMusicRef.current
+    if (!audio) return
+    if (!menuTheme) { audio.pause(); return }
+    if (menuMusicActive) {
+      if (audio.paused) audio.volume = 0
+      void audio.play().catch(() => undefined)
+      return fadeVolume(audio, MENU_MUSIC_VOLUME)
+    }
+    if (!audio.paused) return fadeVolume(audio, 0, () => audio.pause())
+  }, [menuMusicActive, menuTheme, navigation.screen])
+
+  useEffect(() => {
+    const audio = difficultyPreviewRef.current
+    if (!audio) return
+    if (choosingDifficulty) {
+      audio.volume = PREVIEW_VOLUME
+      if (audio.readyState >= HTMLMediaElement.HAVE_METADATA) void audio.play().catch(() => undefined)
+      return
+    }
+    if (!audio.paused) return fadeVolume(audio, 0, () => audio.pause())
+  }, [choosingDifficulty, src, activeScreen, arcadePhase])
   useEffect(() => { if (!pickingSong) setCarouselMotion(null) }, [pickingSong])
   const playNavigationCue = (direction: 'left' | 'right') =>
     playSfx(direction === 'left' ? 'navigateLeft' : 'navigateRight', settings.soundMuted)
@@ -667,6 +714,14 @@ export default function App() {
     <div className="app-shell">
       <LangGlobe />
       <UpdateToast />
+      <audio ref={menuMusicRef} src={menuTheme ? `${import.meta.env.BASE_URL}audio/${menuTheme.file}` : undefined} loop preload="none" />
+      {src && activeScreen === 'arcade' && arcadePhase === 'setup' && <audio ref={difficultyPreviewRef} src={src} preload="auto" onLoadedMetadata={(event) => {
+        const audio = event.currentTarget
+        difficultyPreviewStartRef.current = Math.min(12, Math.max(0, audio.duration - 8))
+        audio.currentTime = selectedPreviewTimeRef.current || difficultyPreviewStartRef.current
+      }} onCanPlay={(event) => { if (choosingDifficulty) void event.currentTarget.play().catch(() => undefined) }} onTimeUpdate={(event) => {
+        if (event.currentTarget.currentTime >= difficultyPreviewStartRef.current + 7) event.currentTarget.currentTime = difficultyPreviewStartRef.current
+      }} />}
       <input ref={fileInputRef} hidden type="file" accept="video/*" onChange={(event) => { void loadFile(event.target.files?.[0], fileDestinationRef.current); event.target.value = '' }} />
       {navigation.screen === 'attract' && <main className="attract-screen" onClick={(event) => { if (event.detail === 0) return; playSfx('menu', settings.soundMuted); dispatch({ type: 'wake' }) }}>
         <Brand />

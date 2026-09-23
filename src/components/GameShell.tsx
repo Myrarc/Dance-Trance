@@ -3,7 +3,7 @@ import { T, L } from '../i18n'
 import { accuracy, type PlayerRound } from '../pose/gameplay'
 import type { Difficulty } from '../pose/hitTargets'
 import { gradeFromAccuracy, type ArcadeRecord, type Grade } from '../game/records'
-import type { GameSettings } from '../lib/gameSettings'
+import { MENU_THEMES, type GameSettings } from '../lib/gameSettings'
 
 function useModalFocus(ref: RefObject<HTMLElement | null>) {
   useEffect(() => {
@@ -179,6 +179,12 @@ export function SettingsScreen({ settings, onChange, onClose }: {
           <Toggle label="Sound effects" detail="Countdown, judgments, combos, and results feedback." checked={!settings.soundMuted} onChange={(value) => update('soundMuted', !value)} />
           <Toggle label="Full motion effects" detail="Turn off for calmer transitions and celebrations." checked={!settings.reducedEffects} onChange={(value) => update('reducedEffects', !value)} />
         </div>
+        <fieldset className="settings-card music-card">
+          <legend>{L('Menu music', '菜单音乐')}</legend>
+          <div className="theme-options">
+            {[...MENU_THEMES, { id: 'off', label: 'Off' } as const].map((theme) => <button key={theme.id} type="button" className={`btn${settings.menuTheme === theme.id ? ' active' : ''}`} aria-pressed={settings.menuTheme === theme.id} onClick={() => update('menuTheme', theme.id)}>{theme.id === 'off' ? T('Off') : theme.label}</button>)}
+          </div>
+        </fieldset>
         <fieldset className="settings-card language-card">
           <legend>{T('Language')}</legend>
           <label><input type="radio" name="language" checked={settings.language === 'en'} onChange={() => update('language', 'en')} /> English</label>

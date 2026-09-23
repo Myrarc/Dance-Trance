@@ -19,6 +19,7 @@ test('settings fall back safely when storage is empty or malformed', () => {
 test('settings preserve valid choices and repair invalid fields', () => {
   const store = storage(JSON.stringify({
     soundMuted: true,
+    menuTheme: 'coin',
     reducedEffects: true,
     language: 'zh',
     showSkeletons: false,
@@ -26,6 +27,7 @@ test('settings preserve valid choices and repair invalid fields', () => {
   }))
   assert.deepEqual(loadGameSettings(store), {
     soundMuted: true,
+    menuTheme: 'coin',
     reducedEffects: true,
     language: 'zh',
     showSkeletons: false,
@@ -37,4 +39,8 @@ test('settings save as one durable value', () => {
   const store = storage()
   saveGameSettings({ ...DEFAULT_GAME_SETTINGS, soundMuted: true }, store)
   assert.equal(JSON.parse(store.value()!).soundMuted, true)
+})
+
+test('an unknown menu theme falls back to the default', () => {
+  assert.equal(loadGameSettings(storage(JSON.stringify({ menuTheme: 'missing' }))).menuTheme, 'theme1')
 })
