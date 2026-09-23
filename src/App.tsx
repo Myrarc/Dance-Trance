@@ -573,12 +573,23 @@ export default function App() {
         <p>{L('Your dance. Your game. One or two players.', '你的舞蹈，你的游戏。一人或两人同玩。')}</p>
       </main>}
       {navigation.screen === 'tracking' && <main className="tracking-screen">
-        <span className="kicker">{L('Step into the game', '进入游戏')}</span>
         <h1>{L('Get in the picture.', '进入画面。')}</h1>
-        <p>{L('Turn on the camera, stand in the marked area, then hold your right hand up with your left hand down. Release your hand to control the menu.', '打开摄像头，站进标记区域，右手举起、左手放下。放下右手后即可用手势控制菜单。')}</p>
-        <div className="tracking-player-choice" role="group" aria-label={T('Players')}>{([1, 2] as const).map((count) => <button key={count} className={`btn${registrationPlayers === count ? ' active' : ''}`} onClick={() => setRegistrationPlayers(count)}>{L(`${count} player${count === 1 ? '' : 's'}`, `${count} 位玩家`)}</button>)}</div>
-        <div className="tracking-options"><div role="group" aria-label={L('Tracking focus', '追踪重点')}>{([['full', T('Whole body')], ['upper', T('Arms only')], ['lower', T('Legs only')]] as const).map(([mode, label]) => <button key={mode} className={`btn${focus === mode ? ' active' : ''}`} aria-pressed={focus === mode} onClick={() => setFocus(mode)}>{label}</button>)}</div><div role="group" aria-label={T('Difficulty')}>{DIFFICULTIES.map((level) => <button key={level} className={`btn${difficulty === level ? ' active' : ''}`} aria-pressed={difficulty === level} onClick={() => setDifficulty(level)}>{T(level)}</button>)}</div></div>
-        <button className="btn subtle" onClick={() => dispatch({ type: 'openHome' })}>{L('Continue to menu', '继续进入菜单')}</button>
+        <p>{L('Turn on the camera. Step into the box, raise your right hand, then lower it to enter.', '打开摄像头。站进框内，举起右手，再放下即可进入。')}</p>
+        <div className="tracking-setup">
+          <fieldset className="tracking-player-choice">
+            <legend>{T('Players')}</legend>
+            <div>{([1, 2] as const).map((count) => <button key={count} className={`btn${registrationPlayers === count ? ' active' : ''}`} aria-pressed={registrationPlayers === count} onClick={() => setRegistrationPlayers(count)}>{L(`${count} player${count === 1 ? '' : 's'}`, `${count} 位玩家`)}</button>)}</div>
+          </fieldset>
+          <fieldset>
+            <legend>{L('Score focus', '计分重点')}</legend>
+            <div>{([['full', T('Whole body')], ['upper', T('Arms only')], ['lower', T('Legs only')]] as const).map(([mode, label]) => <button key={mode} className={`btn${focus === mode ? ' active' : ''}`} aria-pressed={focus === mode} onClick={() => setFocus(mode)}>{label}</button>)}</div>
+          </fieldset>
+          <fieldset>
+            <legend>{T('Difficulty')}</legend>
+            <div>{DIFFICULTIES.map((level) => <button key={level} className={`btn${difficulty === level ? ' active' : ''}`} aria-pressed={difficulty === level} onClick={() => setDifficulty(level)}>{T(level)}</button>)}</div>
+          </fieldset>
+        </div>
+        <button className="btn subtle tracking-back" onClick={() => dispatch({ type: 'openHome' })}>{L('Back to menu', '返回菜单')}</button>
       </main>}
       {activeScreen === 'home' && <HomeScreen libraryCount={library.length} trackingReady={lobby.ready} onArcade={() => go('openArcade')} onPractice={() => go('openPractice')} onLibrary={() => go('openLibrary')} onSettings={() => go('openSettings')} onTracking={() => dispatch({ type: 'wake' })} account={<AccountBar />} />}
       {activeScreen === 'arcade' && renderArcade()}

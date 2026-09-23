@@ -2732,10 +2732,56 @@ input[type='range'] { accent-color: var(--accent); }
 @keyframes attract-bounce { 50% { translate: 0 -10px; } }
 @keyframes coin-pulse { 50% { background: var(--cyan); } }
 
-.tracking-screen { min-height: 100vh; padding: 22px max(24px, 5vw); }
-.tracking-screen h1 { font-size: clamp(34px, 5vw, 64px); line-height: 1; }
-.tracking-screen p { max-width: 80ch; margin-top: 8px; font-size: clamp(17px, 1.5vw, 23px); font-weight: 800; line-height: 1.3; }
-.tracking-player-choice { display: flex; gap: 10px; margin-top: 12px; }
+.tracking-screen {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  width: clamp(300px, 27vw, 480px);
+  min-height: 100dvh;
+  margin-left: auto;
+  padding: clamp(28px, 4vw, 64px) clamp(24px, 3vw, 48px);
+  background: var(--bg);
+}
+.tracking-screen h1 {
+  max-width: 8ch;
+  margin: 0 0 14px;
+  font-size: clamp(34px, 5vw, 64px);
+  line-height: .92;
+}
+.tracking-screen > p {
+  max-width: 34ch;
+  margin: 0;
+  font-size: clamp(17px, 1.5vw, 23px);
+  font-weight: 800;
+  line-height: 1.3;
+}
+.tracking-setup {
+  display: grid;
+  gap: 18px;
+  margin: 28px 0 22px;
+}
+.tracking-setup fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.tracking-setup legend {
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.tracking-setup fieldset > div {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.tracking-setup .tracking-player-choice > div { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.tracking-setup .btn { min-height: 48px; padding-inline: 8px; }
+.tracking-back { align-self: stretch; min-height: 48px; }
 
 .camera-dock {
   position: fixed;
@@ -2757,16 +2803,17 @@ input[type='range'] { accent-color: var(--accent); }
 .camera-dock .gesture-command span { display: none; }
 
 .camera-tracking {
-  top: clamp(370px, 44vh, 460px);
-  right: 5vw;
-  bottom: 5vh;
-  left: 5vw;
-  width: auto;
+  top: 50%;
+  right: auto;
+  bottom: auto;
+  left: clamp(20px, 3vw, 52px);
+  width: min(68vw, calc(100vw - 360px), 1320px);
+  transform: translateY(-50%);
 }
-.camera-tracking > .panel { height: 100%; }
+.camera-tracking > .panel { height: auto; }
 .camera-tracking .panel-head { display: flex; }
 .camera-tracking .controls { display: none; }
-.camera-tracking .webcam-stage { flex: 1; min-height: 45vh; aspect-ratio: auto; }
+.camera-tracking .webcam-stage { flex: none; min-height: 0; aspect-ratio: 16 / 9; }
 .camera-tracking .player-lobby { padding: 22px; }
 .camera-tracking .player-zone { padding: 18px; }
 .camera-tracking .player-zone strong { font-family: inherit; font-size: 30px; }
@@ -2851,8 +2898,25 @@ input[type='range'] { accent-color: var(--accent); }
   .mode-card { min-height: 130px; }
   .attract-demo { min-height: 280px; }
   .demo-one { left: 10%; } .demo-two { right: 10%; }
-  .tracking-screen { padding: 18px; }
-  .camera-tracking { top: 400px; right: 12px; bottom: 10px; left: 12px; }
+  .tracking-screen {
+    justify-content: flex-start;
+    width: 100%;
+    min-height: 100dvh;
+    margin: 0;
+    padding: calc(56.25vw + 90px) 18px 24px;
+  }
+  .tracking-screen h1 { max-width: none; }
+  .tracking-screen > p { max-width: 50ch; }
+  .camera-tracking {
+    top: 12px;
+    right: 12px;
+    bottom: auto;
+    left: 12px;
+    width: auto;
+    transform: none;
+  }
+  .camera-tracking > .panel { height: auto; }
+  .camera-tracking .webcam-stage { flex: none; min-height: 0; aspect-ratio: 16 / 9; }
   .camera-registration { top: 340px; right: 12px; bottom: 12px; left: 12px; }
   .camera-registration .webcam-stage { min-height: 45vh; }
   .camera-registration .calibration-card { position: static; width: 100%; max-height: none; }
@@ -3026,9 +3090,7 @@ input[type='range'] { accent-color: var(--accent); }
 .song-loading-progress { overflow: hidden; height: 18px; margin: 22px 0; border: 3px solid var(--ink); border-radius: 7px; background: var(--panel); }
 .song-loading-progress i { display: block; height: 100%; background: var(--cyan); transition: width 250ms ease; }
 .song-loading-copy .btn { min-height: 52px; font-size: 16px; }
-.tracking-options { display: grid; gap: 12px; margin: 12px 0; }
-.tracking-options > div { display: flex; flex-wrap: wrap; gap: 10px; }
-.tracking-options .btn.active, .tracking-player-choice .btn.active { background: var(--cyan); }
+.tracking-setup .btn.active { background: var(--cyan); }
 .game-screen-active > .game-playing { right: 16px; left: auto; width: min(620px, calc(100vw - 310px)); }
 @media (max-width: 900px) {
   .song-loading-screen { padding: 210px 16px 24px; }
