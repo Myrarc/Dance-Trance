@@ -2541,14 +2541,16 @@ input[type='range'] { accent-color: var(--accent); }
   cursor: pointer;
 }
 .attract-screen .brand-lockup { justify-self: center; width: clamp(300px, 42vw, 630px); max-width: 100%; }
+.attract-screen[data-beat-active] .brand-lockup { scale: var(--beat-logo-scale, 1); }
 .attract-demo {
   position: relative;
   overflow: hidden;
   border: 5px solid var(--panel);
   border-radius: 12px;
   background: repeating-linear-gradient(135deg, var(--accent) 0 80px, var(--warn) 80px 160px);
-  box-shadow: 12px 12px 0 var(--cyan);
+  box-shadow: 0 0 var(--beat-glow, 0px) var(--cyan), 12px 12px 0 var(--cyan);
 }
+.attract-demo::before { content: ''; position: absolute; z-index: 3; inset: 0; border: 5px solid var(--cyan); border-radius: 6px; box-shadow: inset 0 0 30px var(--cyan); opacity: var(--beat-opacity, 0); pointer-events: none; }
 .attract-demo::after { content: ''; position: absolute; inset: 12%; border: 5px solid var(--panel); border-radius: 50%; }
 .demo-player {
   position: absolute;
@@ -2596,13 +2598,12 @@ input[type='range'] { accent-color: var(--accent); }
   font-size: clamp(22px, 3vw, 38px);
   font-weight: 950;
   letter-spacing: .08em;
-  box-shadow: 7px 7px 0 var(--cyan);
-  animation: coin-pulse 1.2s steps(2, end) infinite;
+  box-shadow: 0 0 var(--beat-glow, 0px) var(--warn), 7px 7px 0 var(--cyan);
+  scale: var(--beat-button-scale, 1);
   cursor: pointer;
 }
 .attract-screen > p { font-size: 18px; font-weight: 800; }
 @keyframes attract-bounce { 50% { translate: 0 -10px; } }
-@keyframes coin-pulse { 50% { background: var(--cyan); } }
 
 .tracking-screen {
   display: flex;
@@ -2775,7 +2776,15 @@ input[type='range'] { accent-color: var(--accent); }
 }
 @media (prefers-reduced-motion: reduce) {
   .demo-player, .demo-hit, .demo-combo, .attract-start { animation: none; }
+  .attract-screen .brand-lockup, .attract-start { scale: 1; }
+  .attract-demo { box-shadow: 12px 12px 0 var(--cyan); }
+  .attract-start { box-shadow: 7px 7px 0 var(--cyan); }
+  .attract-demo::before { display: none; }
 }
+.reduce-effects .attract-screen .brand-lockup, .reduce-effects .attract-start { scale: 1; }
+.reduce-effects .attract-demo { box-shadow: 12px 12px 0 var(--cyan); }
+.reduce-effects .attract-start { box-shadow: 7px 7px 0 var(--cyan); }
+.reduce-effects .attract-demo::before { display: none; }
 
 /* Song selection is the stage: large covers, one obvious active track, and a short local preview. */
 .track-picker {

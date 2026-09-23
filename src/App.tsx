@@ -19,6 +19,7 @@ import {
   syncArcadeRecords, syncLibrary, type VideoStats,
 } from './playkitClient'
 import { MENU_THEMES, loadGameSettings, saveGameSettings, type GameSettings } from './lib/gameSettings'
+import { sampleBeat } from './lib/attractBeat'
 import { playSfx } from './lib/sfx'
 import { accuracy, type GamePhase, type HitGrade, type PlayerRound } from './pose/gameplay'
 import type { CueEvent, Difficulty } from './pose/hitTargets'
@@ -94,6 +95,8 @@ export default function App() {
   const previewStartRef = useRef(0)
   const selectedPreviewTimeRef = useRef(0)
   const menuMusicRef = useRef<HTMLAudioElement>(null)
+  const attractRef = useRef<HTMLElement>(null)
+  const beatAudioRef = useRef<{ context: AudioContext; analyser: AnalyserNode } | null>(null)
   const difficultyPreviewRef = useRef<HTMLAudioElement>(null)
   const difficultyPreviewStartRef = useRef(0)
   const wasLobbyReadyRef = useRef(false)
@@ -464,6 +467,59 @@ export default function App() {
   }, [menuMusicActive, menuTheme, navigation.screen])
 
   useEffect(() => {
+    const audio = menuMusicRef.current
+    const attract = attractRef.current
+    if (!audio || !attract || !menuTheme || settings.reducedEffects || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    let frame = 0
+    const stop = () => {
+      cancelAnimationFrame(frame)
+      frame = 0
+      attract.removeAttribute('data-beat-active')
+      attract.style.removeProperty('--beat-logo-scale')
+      attract.style.removeProperty('--beat-button-scale')
+      attract.style.removeProperty('--beat-glow')
+      attract.style.removeProperty('--beat-opacity')
+    }
+    const start = () => {
+      if (frame || audio.paused) return
+      if (!beatAudioRef.current) {
+        const context = new AudioContext()
+        const analyser = context.createAnalyser()
+        analyser.fftSize = 2048
+        analyser.smoothingTimeConstant = .35
+        context.createMediaElementSource(audio).connect(analyser).connect(context.destination)
+        beatAudioRef.current = { context, analyser }
+      }
+      const { context, analyser } = beatAudioRef.current
+      void context.resume().catch(() => undefined)
+      const frequencies = new Uint8Array(analyser.frequencyBinCount)
+      const tracker = { baseline: 0, previous: 0, lastBeat: -Infinity }
+      attract.setAttribute('data-beat-active', '')
+      const tick = (now: number) => {
+        analyser.getByteFrequencyData(frequencies)
+        let energy = 0
+        for (let bin = 2; bin <= 24; bin++) energy += frequencies[bin]
+        sampleBeat(tracker, energy / 23, now)
+        const pulse = Math.max(0, 1 - (now - tracker.lastBeat) / 340)
+        attract.style.setProperty('--beat-logo-scale', String(1 + pulse * .09))
+        attract.style.setProperty('--beat-button-scale', String(1 + pulse * .06))
+        attract.style.setProperty('--beat-glow', `${Math.round(pulse * 38)}px`)
+        attract.style.setProperty('--beat-opacity', String(pulse * .9))
+        frame = requestAnimationFrame(tick)
+      }
+      frame = requestAnimationFrame(tick)
+    }
+    audio.addEventListener('play', start)
+    audio.addEventListener('pause', stop)
+    start()
+    return () => {
+      audio.removeEventListener('play', start)
+      audio.removeEventListener('pause', stop)
+      stop()
+    }
+  }, [navigation.screen, menuTheme, settings.reducedEffects])
+
+  useEffect(() => {
     const audio = difficultyPreviewRef.current
     if (!audio) return
     if (choosingDifficulty) {
@@ -723,7 +779,7 @@ export default function App() {
         if (event.currentTarget.currentTime >= difficultyPreviewStartRef.current + 7) event.currentTarget.currentTime = difficultyPreviewStartRef.current
       }} />}
       <input ref={fileInputRef} hidden type="file" accept="video/*" onChange={(event) => { void loadFile(event.target.files?.[0], fileDestinationRef.current); event.target.value = '' }} />
-      {navigation.screen === 'attract' && <main className="attract-screen" onClick={(event) => { if (event.detail === 0) return; playSfx('menu', settings.soundMuted); dispatch({ type: 'wake' }) }}>
+      {navigation.screen === 'attract' && <main ref={attractRef} className="attract-screen" onClick={(event) => { if (event.detail === 0) return; playSfx('menu', settings.soundMuted); dispatch({ type: 'wake' }) }}>
         <Brand />
         <div className="attract-demo" aria-hidden="true">
           <span className="demo-player demo-one">P1</span><span className="demo-player demo-two">P2</span>
