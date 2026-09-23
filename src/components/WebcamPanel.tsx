@@ -120,6 +120,7 @@ interface Props {
   focus: Focus
   onFocusChange: (focus: Focus) => void
   showSkeletons: boolean
+  onShowSkeletonsChange?: (visible: boolean) => void
   trackHead?: boolean
   gamePhase?: GamePhase
   gameRun?: number
@@ -154,6 +155,7 @@ export default function WebcamPanel({
   focus,
   onFocusChange,
   showSkeletons,
+  onShowSkeletonsChange,
   trackHead = true,
   gamePhase = 'lobby',
   gameRun = 0,
@@ -828,6 +830,16 @@ export default function WebcamPanel({
           className={gameplaySkeletonsVisible ? undefined : 'skeleton-hidden'}
           aria-hidden={!gameplaySkeletonsVisible}
         />
+        {running && onShowSkeletonsChange && calibration?.phase !== 'framing' && calibration?.phase !== 'movement' && (
+          <button
+            type="button"
+            className={`camera-skeleton-toggle${showSkeletons ? ' active' : ''}`}
+            aria-pressed={showSkeletons}
+            onClick={() => onShowSkeletonsChange(!showSkeletons)}
+          >
+            {showSkeletons ? L('Skeleton on', '骨架开启') : L('Skeleton off', '骨架关闭')}
+          </button>
+        )}
         {running && !lobbyReady && (
           <div className={`player-lobby ${playerSetup.count === 1 ? 'solo' : ''}`} aria-live="polite">
             {(playerSetup.count === 1 ? [0] : [0, 1]).map((index) => {

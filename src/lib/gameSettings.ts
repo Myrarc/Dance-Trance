@@ -13,6 +13,7 @@ export interface GameSettings {
   reducedEffects: boolean
   language: 'en' | 'zh'
   showSkeletons: boolean
+  showCameraSkeletons: boolean
   trackHead: boolean
 }
 
@@ -26,6 +27,7 @@ export const DEFAULT_GAME_SETTINGS: GameSettings = {
   reducedEffects: false,
   language: 'en',
   showSkeletons: true,
+  showCameraSkeletons: true,
   trackHead: true,
 }
 
@@ -47,6 +49,9 @@ export function loadGameSettings(storage: SettingsStorage | null = browserStorag
       reducedEffects: typeof saved.reducedEffects === 'boolean' ? saved.reducedEffects : false,
       language: saved.language === 'zh' ? 'zh' : 'en',
       showSkeletons: typeof saved.showSkeletons === 'boolean' ? saved.showSkeletons : true,
+      showCameraSkeletons: typeof saved.showCameraSkeletons === 'boolean'
+        ? saved.showCameraSkeletons
+        : typeof saved.showSkeletons === 'boolean' ? saved.showSkeletons : true,
       trackHead: typeof saved.trackHead === 'boolean' ? saved.trackHead : true,
     }
   } catch {

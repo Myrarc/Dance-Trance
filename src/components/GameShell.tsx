@@ -178,7 +178,7 @@ export function SettingsScreen({ settings, onChange, onClose }: {
       <section className="settings-grid">
         <div className="settings-card">
           <h2>{T('Gameplay')}</h2>
-          <Toggle label="Show skeleton overlays" detail="Display pose guides on both the reference and camera." checked={settings.showSkeletons} onChange={(value) => update('showSkeletons', value)} />
+          <Toggle label="Show reference skeleton" detail="Display the pose guide over the reference video." checked={settings.showSkeletons} onChange={(value) => update('showSkeletons', value)} />
           <Toggle label="Track head movements" detail="Include head cues and head position in scoring." checked={settings.trackHead} onChange={(value) => update('trackHead', value)} />
         </div>
         <div className="settings-card">

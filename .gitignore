@@ -30,3 +30,6 @@ public/models
 
 # Local env
 .env.local
+
+# Impeccable critique
+.impeccable

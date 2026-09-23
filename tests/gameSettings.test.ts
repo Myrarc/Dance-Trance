@@ -31,8 +31,18 @@ test('settings preserve valid choices and repair invalid fields', () => {
     reducedEffects: true,
     language: 'zh',
     showSkeletons: false,
+    showCameraSkeletons: false,
     trackHead: true,
   })
+})
+
+test('camera and reference skeleton preferences stay independent', () => {
+  const saved = loadGameSettings(storage(JSON.stringify({
+    showSkeletons: false,
+    showCameraSkeletons: true,
+  })))
+  assert.equal(saved.showSkeletons, false)
+  assert.equal(saved.showCameraSkeletons, true)
 })
 
 test('settings save as one durable value', () => {

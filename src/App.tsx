@@ -530,6 +530,21 @@ export default function App() {
     if (!audio.paused) return fadeVolume(audio, 0, () => audio.pause())
   }, [choosingDifficulty, src, activeScreen, arcadePhase])
   useEffect(() => { if (!pickingSong) setCarouselMotion(null) }, [pickingSong])
+  useEffect(() => {
+    if (!carouselMotion) return
+    const timer = window.setTimeout(() => setCarouselMotion(null), 520)
+    return () => window.clearTimeout(timer)
+  }, [carouselMotion])
+  useEffect(() => {
+    if (!difficultyMotion) return
+    const timer = window.setTimeout(() => setDifficultyMotion(null), 520)
+    return () => window.clearTimeout(timer)
+  }, [difficultyMotion])
+  useEffect(() => {
+    if (!homeMotion) return
+    const timer = window.setTimeout(() => setHomeMotion(null), 520)
+    return () => window.clearTimeout(timer)
+  }, [homeMotion])
   const playNavigationCue = (direction: 'left' | 'right') =>
     playSfx(direction === 'left' ? 'navigateLeft' : 'navigateRight', settings.soundMuted)
   const moveSong = (direction: 'left' | 'right') => {
@@ -809,7 +824,7 @@ export default function App() {
       {activeScreen === 'practice' && renderPractice()}
       {activeScreen === 'library' && renderLibrary()}
       {navigation.screen !== 'attract' && <Suspense fallback={null}><div className={`camera-dock camera-${navigation.screen === 'tracking' ? 'tracking' : activeScreen === 'arcade' ? arcadePhase : activeScreen}${cameraRunning ? '' : ' camera-off'}`}>
-        <WebcamPanel targetRef={targetRef} videoId={current?.id} videoName={current?.name} onSectionPractice={(deltas) => void recordSectionPractice(deltas)} focus={focus} onFocusChange={setFocus} showSkeletons={settings.showSkeletons} trackHead={settings.trackHead} gamePhase={activeScreen === 'arcade' ? gamePhase : 'lobby'} gameRun={gameRun} onLobbyChange={updateLobby} onGameScores={updateGameScores} onHit={showHit} onScoreDebug={import.meta.env.DEV ? updateScoreDebug : undefined} registrationPlayers={registrationPlayers} onRegistrationPlayersChange={activeScreen === 'practice' ? setRegistrationPlayers : undefined} gestureContext={gestureContext} onGestureAction={handleGestureAction} soundMuted={settings.soundMuted} onRunningChange={setCameraRunning} />
+        <WebcamPanel targetRef={targetRef} videoId={current?.id} videoName={current?.name} onSectionPractice={(deltas) => void recordSectionPractice(deltas)} focus={focus} onFocusChange={setFocus} showSkeletons={settings.showCameraSkeletons} onShowSkeletonsChange={(visible) => updateSettings({ ...settings, showCameraSkeletons: visible })} trackHead={settings.trackHead} gamePhase={activeScreen === 'arcade' ? gamePhase : 'lobby'} gameRun={gameRun} onLobbyChange={updateLobby} onGameScores={updateGameScores} onHit={showHit} onScoreDebug={import.meta.env.DEV ? updateScoreDebug : undefined} registrationPlayers={registrationPlayers} onRegistrationPlayersChange={activeScreen === 'practice' ? setRegistrationPlayers : undefined} gestureContext={gestureContext} onGestureAction={handleGestureAction} soundMuted={settings.soundMuted} onRunningChange={setCameraRunning} />
       </div></Suspense>}
       {navigation.screen === 'settings' && <SettingsScreen settings={settings} onChange={updateSettings} onClose={() => dispatch({ type: 'closeSettings' })} />}
     </div>
