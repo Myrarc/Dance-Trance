@@ -118,6 +118,29 @@ test('recognises deliberate menu poses without treating both arms out as navigat
   assert.equal(isCrossedArms(p), true)
 })
 
+test('bent arms slightly below shoulder height can navigate but resting arms cannot', () => {
+  const p = pose()
+  Object.assign(p[0], { x: 0.5, y: 0.25 })
+  Object.assign(p[11], { x: 0.4, y: 0.45 })
+  Object.assign(p[12], { x: 0.6, y: 0.45 })
+  Object.assign(p[13], { x: 0.3, y: 0.54 })
+  Object.assign(p[15], { x: 0.26, y: 0.56 })
+  Object.assign(p[14], { x: 0.61, y: 0.58 })
+  Object.assign(p[16], { x: 0.61, y: 0.7 })
+  assert.equal(detectMenuGesture(p), 'previous')
+  assert.equal(detectMenuGesture(p.map((point) => ({ ...point, x: 1 - point.x }))), 'previous')
+
+  Object.assign(p[13], { x: 0.39, y: 0.58 })
+  Object.assign(p[15], { x: 0.39, y: 0.7 })
+  Object.assign(p[14], { x: 0.7, y: 0.54 })
+  Object.assign(p[16], { x: 0.74, y: 0.56 })
+  assert.equal(detectMenuGesture(p), 'next')
+
+  Object.assign(p[14], { x: 0.61, y: 0.58 })
+  Object.assign(p[16], { x: 0.61, y: 0.7 })
+  assert.equal(detectMenuGesture(p), null)
+})
+
 test('three live beeps precede navigation, then a held pose repeats at a controlled rate', () => {
   let state: GestureHold = { candidate: null, since: 0, latched: false, beeps: 0, lastBeepAt: 0 }
   let reading = advanceGestureHold(state, 'next', 100)
