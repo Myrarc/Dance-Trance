@@ -49,8 +49,18 @@ export function Brand({ compact = false }: { compact?: boolean }) {
   )
 }
 
-export function HomeScreen({ libraryCount, trackingReady, selected, motion, onMove, onSelect, account }: {
-  libraryCount: number
+function HomeIcon({ index }: { index: number }) {
+  const icons = [
+    <path key="play" d="M7 3.5v17L21 12z" fill="currentColor" stroke="none" />,
+    <g key="practice"><circle cx="12" cy="4" r="2" /><path d="M12 6v9M12 9 4 6m8 3 8-3m-8 9-5 7m5-7 5 7" /></g>,
+    <g key="library"><rect x="5" y="3" width="14" height="18" rx="1" /><path d="M8 8h8m-8 4h8m-8 4h5" /></g>,
+    <g key="settings"><circle cx="12" cy="12" r="6" /><circle cx="12" cy="12" r="2" /><path d="M12 1v3m0 16v3M1 12h3m16 0h3M4.2 4.2l2.1 2.1m11.4 11.4 2.1 2.1m0-15.6-2.1 2.1M6.3 17.7l-2.1 2.1" /></g>,
+    <g key="camera"><rect x="2" y="5" width="20" height="16" rx="2" /><path d="m8 5 1.5-2h5L16 5" /><circle cx="12" cy="13" r="4" /></g>,
+  ]
+  return <svg className="home-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{icons[index]}</svg>
+}
+
+export function HomeScreen({ trackingReady, selected, motion, onMove, onSelect, account }: {
   trackingReady: boolean
   selected: number
   motion: { direction: 'left' | 'right'; turn: number } | null
@@ -61,11 +71,11 @@ export function HomeScreen({ libraryCount, trackingReady, selected, motion, onMo
   const centerRef = useRef<HTMLButtonElement>(null)
   useEffect(() => centerRef.current?.focus({ preventScroll: true }), [selected])
   const options = [
-    { eyebrow: T('Your dance, your game'), title: T('Play'), body: T('Turn a song into an arcade round.'), tone: 'yellow' },
-    { eyebrow: T('Learn the routine'), title: T('Practice Studio'), body: T('Loop, slow down, and focus on the parts that need work.'), tone: 'cyan' },
-    { eyebrow: L(`${libraryCount} saved tracks`, `已保存 ${libraryCount} 首歌曲`), title: T('Library'), body: T('Pick up a prepared song or bring in a new dance video.'), tone: 'yellow' },
-    { eyebrow: T('Make it yours'), title: T('Settings'), body: T('Adjust tracking overlays, sound, language, and motion.'), tone: 'cream' },
-    { eyebrow: T('Get back in frame'), title: T('Camera setup'), body: T('Reconnect tracking and register players again.'), tone: 'cyan' },
+    { title: T('Play'), body: T('Turn a song into an arcade round.'), tone: 'yellow' },
+    { title: T('Practice Studio'), body: T('Loop, slow down, and focus on the parts that need work.'), tone: 'cyan' },
+    { title: T('Library'), body: T('Pick up a prepared song or bring in a new dance video.'), tone: 'yellow' },
+    { title: T('Settings'), body: T('Adjust tracking overlays, sound, language, and motion.'), tone: 'cream' },
+    { title: T('Camera setup'), body: T('Reconnect tracking and register players again.'), tone: 'cyan' },
   ]
 
   return (
@@ -81,7 +91,6 @@ export function HomeScreen({ libraryCount, trackingReady, selected, motion, onMo
       </div>
       <section className="home-hero">
         <div className="home-copy">
-          <span className="kicker">{T(trackingReady ? 'Gesture controls ready' : 'Camera setup needed for gestures')}</span>
           <h1>{T('Choose your game.')}</h1>
           <p>{T(trackingReady ? 'Move through the menu with your arms, then raise your right hand to choose.' : 'Use the buttons or open Camera setup to enable gesture controls.')}</p>
         </div>
@@ -99,10 +108,9 @@ export function HomeScreen({ libraryCount, trackingReady, selected, motion, onMo
             aria-label={option.title}
             onClick={() => offset === 0 ? onSelect() : onMove(offset === -1 ? 'left' : 'right')}
           >
-            <span className="home-card-eyebrow">{option.eyebrow}</span>
             <strong>{option.title}</strong>
             <small>{option.body}</small>
-            <i aria-hidden="true">{offset === 0 ? '▶' : offset === -1 ? '←' : '→'}</i>
+            <span className="home-card-footer"><HomeIcon index={index} /><i aria-hidden="true">{offset === 0 ? L('SELECT', '选择') : offset === -1 ? '←' : '→'}</i></span>
           </button>
         })}
       </nav>

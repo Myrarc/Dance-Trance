@@ -748,7 +748,7 @@ export default function App() {
         </div>
         <button className="btn subtle tracking-back" onClick={() => dispatch({ type: 'openHome' })}>{L('Back to menu', '返回菜单')}</button>
       </main>}
-      {activeScreen === 'home' && <HomeScreen libraryCount={library.length} trackingReady={lobby.ready} selected={homeSelected} motion={homeMotion} onMove={moveHome} onSelect={selectHome} account={<AccountBar />} />}
+      {activeScreen === 'home' && <HomeScreen trackingReady={lobby.ready} selected={homeSelected} motion={homeMotion} onMove={moveHome} onSelect={selectHome} account={<AccountBar />} />}
       {activeScreen === 'arcade' && renderArcade()}
       {activeScreen === 'practice' && renderPractice()}
       {activeScreen === 'library' && renderLibrary()}
