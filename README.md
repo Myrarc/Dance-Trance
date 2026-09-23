@@ -1,16 +1,14 @@
 # Dance Trance
 
 <p align="center">
-  <img src="docs/hero.png" alt="Reference video and your webcam side by side, with per-limb match colouring." width="820">
+  <img src="docs/hero.png" alt="Dance Trance: arcade dance rhythm game with camera tracking and dance practice studio." width="820">
 </p>
 
-<p align="center"><a href="https://dance-trainer.fly.dev"><b>Try it in your browser</b></a></p>
+> **Fork Notice**: Dance Trance is forked from [Chuyuyan/dance-trainer](https://github.com/Chuyuyan/dance-trainer). While the original side-by-side dance practice tool remains available as **Practice Studio**, Dance Trance transforms the experience into a full **Danzbase-style arcade rhythm game**.
 
-Turn any dance video into a private one or two-player rhythm game, or open Practice Studio for skeleton overlays, slow motion, looping, and detailed coaching.
+Turn any dance video into a private one or two-player arcade dance game with real-time pose tracking, beat detection, timed cue scoring, and full-body gesture navigation — or switch to **Practice Studio** for side-by-side skeleton overlays, slow motion, looping, and detailed coaching.
 
-Video and webcam frames are processed **entirely in the browser** — neither your video nor your camera feed is ever uploaded. By default the app makes no requests to any server of mine at all.
-
-Accounts are optional and off by default (see [Accounts](#accounts-optional)); when enabled, the only thing stored is aggregate practice numbers — how long you practised and how closely you matched.
+Video and webcam frames are processed **entirely in the browser** — neither your video nor your camera feed is ever uploaded. Camera frames, imported videos, and pose landmarks stay strictly on your local device.
 
 ## Why this exists
 
@@ -51,6 +49,26 @@ and the camera all stay on the machine.
 
 ## What it does
 
+### Arcade Mode (Danzbase Style)
+
+- **Insert Coin Attract Screen**: Arcade cabinet experience with attract loops and wake trigger via key, tap, controller, or gesture.
+- **Body Gesture Menu Navigation**: Navigate comfortably from dance-floor distance:
+  - Hold **Left arm out** to browse left
+  - Hold **Right arm out** to browse right
+  - Raise **Right hand** to Select / Confirm
+  - Raise **Left hand** to go Back
+  - Hold **Crossed arms** for 2 seconds during a round to Pause
+  - Pointer, touch, and keyboard controls remain available at all times.
+- **One or Two Players**: Choose Solo or 2-Player Versus modes with distinct mirrored player tracking zones, slot-locking, and clothing-color/movement identity retention.
+- **Song Carousel & Auto-Analysis**: Circular song selector with preview loops; loads videos and extracts beat grids, audio peaks, and reference dancer keyframes entirely locally.
+- **Timed Rhythm Cues & Scoring**:
+  - Automatically derived hit markers: **Spot**, **Hold**, **Clap**, and **Torso Swing**
+  - Real-time judgment (Perfect / Great / Good / Miss), score counters, combo tracking, and end-of-round performance rankings.
+- **Camera Calibration & Check**: On-device framing check, joint visibility verification, and arm movement test before the countdown.
+- **Independent Skeleton Controls**: Toggle reference skeleton and camera player skeleton overlays separately directly from the screen or settings.
+
+### Practice Studio
+
 **Reference panel**
 
 - Load (or drop in) any video; the dancer's skeleton is extracted per frame and drawn over it
@@ -64,7 +82,7 @@ and the camera all stay on the machine.
   - **Fit** (recommended) — settles on a framing and then holds it
   - **Follow** — keeps the dancer centred, for footage where they travel
 - Group video: click a dancer to lock onto them
-- *Fingers* — overlays a 21-point hand skeleton (off by default, see below)
+- *Fingers* — overlays a 21-point hand skeleton (off by default)
 - **Library** — every video you open is remembered, with a poster frame, so the next session is one click away instead of another trip through the file picker
 - **Sections** — mark the phrases of a routine with one click each, then click one to loop it. Practice is charged to the phrase you were actually dancing, so you can see which eight-count you have been avoiding
 
@@ -76,7 +94,6 @@ and the camera all stay on the machine.
 - A prompt naming the joints that are furthest off, head turn included
 - Landmarks are filtered, so standing still gives a still skeleton and a steady score
 - *Sides*: Auto works out whether the reference dancer faces the camera and mirrors only when it should, so tutorials filmed from behind are not marked wrong
-- This side deliberately does **not** colour by left and right. Colour is spent on the more useful signal, and two colour languages on one skeleton would collide.
 
 ## Running it
 
@@ -364,6 +381,18 @@ so comparing your match score to someone else's would be meaningless.
 Only those aggregate numbers and the library index (names, durations, recency)
 are transmitted. Pose detection, video files, and camera frames stay on your
 machine.
+
+## Credits & Fork Attribution
+
+Dance Trance is created and developed by [Myrarc](https://github.com/Myrarc).
+
+It is forked from [Chuyuyan/dance-trainer](https://github.com/Chuyuyan/dance-trainer), which originally built the in-browser side-by-side pose matching and practice studio architecture. Dance Trance extends this foundation with:
+- Full Danzbase-style arcade gameplay, attract loop, and menus
+- Circular song carousel with video/audio loop previews
+- Automatic audio rhythm & beat tracking paired with dancer movement peak analysis
+- Real-time gesture navigation designed for dance-floor distance
+- Multi-player camera zoning, persistent slot locking, and 2-player versus scoring
+- Spot, Hold, Clap, and Torso Swing cue generation and judgment systems
 
 ## Stack
 
