@@ -1,6 +1,7 @@
 import type { NormalizedLandmark } from '@mediapipe/tasks-vision'
 import { inPlayerZone, isRightHandRaised, playerScreenX } from './gestures.ts'
 import { LM } from './skeleton.ts'
+import type { Focus } from './angles.ts'
 
 export type CalibrationIssue = 'missing' | 'zone' | 'body' | 'arms' | 'feet' | 'head' | 'distance' | 'sideways' | 'motion' | 'slow'
 export type CalibrationPhase = 'framing' | 'movement' | 'passed' | 'failed'
@@ -20,6 +21,7 @@ export interface CalibrationPlayer {
 
 export interface CalibrationState {
   phase: CalibrationPhase
+  focus: Focus
   playerCount: number
   startedAt: number
   phaseStartedAt: number
@@ -45,6 +47,7 @@ export function assessCalibrationPose(
   playerIndex: number,
   playerCount: number,
   trackHead = true,
+  focus: Focus = 'full',
 ): { reason: CalibrationIssue | null } {
   if (!pose) return { reason: 'missing' }
   if (![LM.lShoulder, LM.rShoulder, LM.lHip, LM.rHip].every((index) => reliable(pose[index]))) {
@@ -58,7 +61,7 @@ export function assessCalibrationPose(
   if (![LM.lElbow, LM.rElbow, LM.lWrist, LM.rWrist].every((index) => reliable(pose[index]))) {
     return { reason: 'arms' }
   }
-  if (![LM.lKnee, LM.rKnee, LM.lAnkle, LM.rAnkle].every((index) => reliable(pose[index]))) {
+  if (focus !== 'upper' && ![LM.lKnee, LM.rKnee, LM.lAnkle, LM.rAnkle].every((index) => reliable(pose[index]))) {
     return { reason: 'feet' }
   }
   if (trackHead && !reliable(pose[LM.nose])) return { reason: 'head' }
@@ -75,9 +78,9 @@ function mostCommonIssue(player: CalibrationPlayer): CalibrationIssue {
   return (sorted[0]?.[0] as CalibrationIssue | undefined) ?? 'missing'
 }
 
-export function beginCalibration(playerCount: 1 | 2, nowMs: number): CalibrationState {
+export function beginCalibration(playerCount: 1 | 2, nowMs: number, focus: Focus = 'full'): CalibrationState {
   return {
-    phase: 'framing', playerCount, startedAt: nowMs, phaseStartedAt: nowMs,
+    phase: 'framing', focus, playerCount, startedAt: nowMs, phaseStartedAt: nowMs,
     players: Array.from({ length: playerCount }, () => ({
       frames: 0, goodFrames: 0, movementFrames: 0, movementGoodFrames: 0,
       downStreak: 0, upStreak: 0, sawDown: false, sawUp: false,
@@ -96,7 +99,7 @@ export function advanceCalibration(
   const players = state.players.map((previous, index) => {
     const player = { ...previous, issues: { ...previous.issues } }
     const pose = poses[index]
-    const { reason } = assessCalibrationPose(pose, index, state.playerCount, trackHead)
+    const { reason } = assessCalibrationPose(pose, index, state.playerCount, trackHead, state.focus)
     if (state.phase === 'framing') {
       player.frames++
       if (reason === null) player.goodFrames++
@@ -153,7 +156,8 @@ export function canStartWithCalibration(
   visiblePlayers: number,
   calibration: CalibrationState | null,
   bypassed: boolean,
+  focus: Focus = 'full',
 ): boolean {
-  return lobbyReady && !!calibration && calibration.playerCount === visiblePlayers &&
+  return lobbyReady && !!calibration && calibration.focus === focus && calibration.playerCount === visiblePlayers &&
     (calibration.phase === 'passed' || (calibration.phase === 'failed' && bypassed))
 }

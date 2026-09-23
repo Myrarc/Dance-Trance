@@ -2,8 +2,10 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { gameReducer, initialGameState } from '../src/game/state.ts'
 
-test('the app always starts at the home hub', () => {
-  assert.deepEqual(initialGameState, { screen: 'home', arcadePhase: 'setup', returnScreen: null })
+test('the camera stays off until the attract screen is dismissed', () => {
+  assert.deepEqual(initialGameState, { screen: 'attract', arcadePhase: 'setup', returnScreen: null })
+  assert.equal(gameReducer(initialGameState, { type: 'wake' }).screen, 'tracking')
+  assert.equal(gameReducer(gameReducer(initialGameState, { type: 'wake' }), { type: 'openHome' }).screen, 'home')
 })
 
 test('arcade navigation follows setup through results and replay', () => {
@@ -37,5 +39,6 @@ test('settings opened from pause returns to the paused round', () => {
 test('restart does not visit results and quitting resets the arcade flow', () => {
   const playing = { ...initialGameState, screen: 'arcade' as const, arcadePhase: 'playing' as const }
   assert.equal(gameReducer(playing, { type: 'restart' }).arcadePhase, 'countdown')
+  assert.deepEqual(gameReducer(playing, { type: 'openHome' }), { screen: 'home', arcadePhase: 'setup', returnScreen: null })
   assert.deepEqual(gameReducer(playing, { type: 'quitHome' }), initialGameState)
 })

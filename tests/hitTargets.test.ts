@@ -53,6 +53,17 @@ test('turns a movement endpoint into a Spot cue', () => {
   assert.ok(cue.confidence > 0)
 })
 
+test('moving across the frame with still limbs does not create hand hits', () => {
+  const track = makeTrack((data, frame) => {
+    const shift = Math.min(frame, 6) * 0.014
+    for (let index = 0; index < 33; index++) {
+      const offset = frame * stride + index * 6
+      setPoint(data, frame, index, data[offset] + shift, data[offset + 1])
+    }
+  })
+  assert.equal(buildCueChart(track, 'hard').some((cue) => cue.kind === 'spot' && (cue.joint === 'leftHand' || cue.joint === 'rightHand')), false)
+})
+
 test('turns a stable movement endpoint into a Hold cue', () => {
   const track = makeTrack((data, frame) => {
     const x = frame < 6 ? 0.3 + frame * 0.07 : frame < 24 ? 0.72 : 0.5

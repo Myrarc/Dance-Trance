@@ -85,6 +85,8 @@ npm install   # also runs npm run setup, which fetches the models and WASM
 npm run dev
 ```
 
+The game opens on an Insert Coin screen. Press a key, tap, click, or press a controller button to enter camera tracking. Register by holding your right hand up with your left hand down, then release to use the menu. Hold one arm out to keep moving through options; lower it to stop. Raise the right hand to select, or cross both arms to go back. The song picker loops a seven-second preview from the selected local video; if sound autoplay is blocked, press **Play preview**. During a song, hold crossed arms for two seconds to pause. If the camera is unavailable, **Continue to menu** keeps pointer and keyboard navigation available. Adding a new video still uses your device's file picker.
+
 `npm run setup` copies MediaPipe's WASM runtime out of `node_modules` into `public/wasm` and downloads the pose and hand models into `public/models` (about 38 MB, kept out of version control). After that it runs offline.
 
 The production build is an installable PWA. Its interface is cached immediately; pose models and WASM are cached after first use, so first-time tracking setup still needs a connection. Imported videos remain local in IndexedDB and are never included in cloud sync.

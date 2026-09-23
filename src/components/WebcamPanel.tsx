@@ -13,6 +13,8 @@ import { CameraRequestTimeoutError, requestCameraStream } from '../lib/cameraStr
 import Checkup from './Checkup'
 import {
   advanceGestureFromPose,
+  advancePauseHold,
+  detectMenuGesture,
   gestureLabel,
   inPlayerZone,
   isRightHandRaised,
@@ -81,7 +83,7 @@ const CALIBRATION_ADVICE: Record<CalibrationIssue, string> = {
   arms: 'Keep both elbows and wrists inside the picture.',
   feet: 'Step back until both knees and ankles are visible.',
   head: 'Keep your head visible and face the camera.',
-  distance: 'Adjust your distance so your whole body fits clearly.',
+  distance: 'Move until your shoulders and hips fit clearly.',
   sideways: 'Face the camera more directly.',
   motion: 'Lower your right arm, then raise your right hand above your head.',
   slow: 'Tracking is too slow for a reliable check. Close other camera apps.',
@@ -129,6 +131,7 @@ interface Props {
   onCalibrationChange?: (state: CalibrationState | null) => void
   gestureContext?: GestureContext | null
   onGestureAction?: (gesture: MenuGesture) => void
+  onRunningChange?: (running: boolean) => void
 }
 
 export interface ScoreDebug {
@@ -161,6 +164,7 @@ export default function WebcamPanel({
   onCalibrationChange,
   gestureContext = null,
   onGestureAction,
+  onRunningChange,
 }: Props) {
   const focusRef = useRef<Focus>('full')
   focusRef.current = focus
@@ -192,6 +196,7 @@ export default function WebcamPanel({
   const registeredPlayerCountRef = useRef(1)
   const roundsRef = useRef<PlayerRound[]>([newPlayerRound(), newPlayerRound()])
   const gestureHoldRef = useRef<GestureHold>({ ...EMPTY_GESTURE_HOLD })
+  const pauseHoldRef = useRef<ReturnType<typeof advancePauseHold>['hold']>(null)
   const gestureContextRef = useRef(gestureContext)
   const onGestureActionRef = useRef(onGestureAction)
   const audioContextRef = useRef<AudioContext | null>(null)
@@ -209,6 +214,7 @@ export default function WebcamPanel({
   const sessionRef = useRef({ startedAt: 0, sum: 0, count: 0, best: 0 })
 
   const [running, setRunning] = useState(false)
+  useEffect(() => onRunningChange?.(running), [running, onRunningChange])
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [mirrorMode, setMirrorMode] = useState<MirrorMode>('auto')
@@ -234,6 +240,7 @@ export default function WebcamPanel({
     gesture: null,
     progress: 0,
   })
+  const [pauseProgress, setPauseProgress] = useState(0)
   const livePlayerCountRef = useRef(0)
 
   mirrorModeRef.current = mirrorMode
@@ -244,7 +251,7 @@ export default function WebcamPanel({
   const beginCheck = () => {
     const count = playerLockRef.current?.slots.length ?? livePlayerCountRef.current
     if (!running || (count !== 1 && count !== 2)) return
-    const next = beginCalibration(count, performance.now())
+    const next = beginCalibration(count, performance.now(), focusRef.current)
     calibrationRef.current = next
     gestureHoldRef.current = { ...EMPTY_GESTURE_HOLD, candidate: 'confirm', latched: true }
     setCalibration(next)
@@ -261,6 +268,8 @@ export default function WebcamPanel({
     playerSmoothersRef.current.forEach((smoother) => smoother.reset())
     playerWorldSmoothersRef.current.forEach((smoother) => smoother.reset())
     gestureHoldRef.current = { ...EMPTY_GESTURE_HOLD }
+    pauseHoldRef.current = null
+    setPauseProgress(0)
     latestRef.current = null
     emaRef.current = null
     lagRef.current = null
@@ -539,8 +548,8 @@ export default function WebcamPanel({
         setLobbyReady(true)
       }
 
-      if (lobbyReadyRef.current && requireCalibrationRef.current && !calibrationRef.current) {
-        const next = beginCalibration(registrationPlayersRef.current, frameNow)
+      if (lobbyReadyRef.current && requireCalibrationRef.current && calibrationRef.current?.focus !== focusRef.current) {
+        const next = beginCalibration(registrationPlayersRef.current, frameNow, focusRef.current)
         calibrationRef.current = next
         setCalibration(next)
         onCalibrationChange?.(next)
@@ -558,6 +567,14 @@ export default function WebcamPanel({
 
       const pose = poses[0]
       const world = players[0]?.world
+      const pauseReading = advancePauseHold(pauseHoldRef.current,
+        gamePhase === 'playing' && lobbyReadyRef.current && !!pose && detectMenuGesture(pose) === 'back',
+        pose ? playerScreenX(pose) : null, frameNow)
+      pauseHoldRef.current = pauseReading.hold
+      if (pauseReading.fired) {
+        gestureHoldRef.current = { ...EMPTY_GESTURE_HOLD, candidate: 'back', latched: true }
+        onGestureActionRef.current?.('back')
+      }
       let gestureReading = {
         ...gestureHoldRef.current,
         progress: gestureHoldRef.current.latched ? 1 : 0,
@@ -755,6 +772,7 @@ export default function WebcamPanel({
         }
         onLobbyChange?.(lobbyReadyRef.current, count)
         setGestureFeedback({ gesture: gestureReading.candidate, progress: gestureReading.progress })
+        setPauseProgress(pauseReading.progress)
       }
       if (frameNow - lastMetricsAt >= 1000) {
         lastMetricsAt = frameNow
@@ -769,6 +787,30 @@ export default function WebcamPanel({
       else cancelAnimationFrame(handle)
     }
   }, [running, targetRef, gamePhase, gameRun, onGameScores, onHit, onLobbyChange, onScoreDebug, onCalibrationChange])
+
+  const calibrationGuide = running && gamePhase === 'lobby' && lobbyReady && calibration && !checking && (
+    <div className="calibration-card" role="status" aria-live="polite">
+      <strong>{calibration.phase === 'framing' && calibration.focus === 'upper'
+        ? L('Checking arm tracking', '正在检查手臂追踪')
+        : T(calibration.phase === 'framing' ? 'Checking full-body tracking' : calibration.phase === 'movement' ? 'Checking movement tracking' : calibration.phase === 'passed' ? 'Tracking check passed' : 'Tracking needs attention')}</strong>
+      <p>{calibration.phase === 'framing' && calibration.focus === 'upper'
+        ? L('Keep your shoulders, hips, elbows and wrists in view. Legs can stay out of frame.', '保持肩部、髋部、肘部和手腕在画面内。双腿可以不在画面内。')
+        : T(calibration.phase === 'framing' ? 'Stand in your area with your whole body visible.' : calibration.phase === 'movement' ? 'Lower your right arm, then raise your right hand above your head.' : calibration.phase === 'passed' ? 'Your pose stayed visible and your right arm movement was detected.' : 'Adjust your camera setup and try again. You can still play with reduced tracking quality.')}</p>
+      {(calibration.phase === 'passed' || calibration.phase === 'failed') && (
+        <ul>
+          {calibration.players.map((player, index) => (
+            <li key={index}>
+              <b>{L(`Player ${index + 1}`, `玩家 ${index + 1}`)}</b>
+              <span>{player.reason ? T(CALIBRATION_ADVICE[player.reason]) : calibration.focus === 'upper'
+                ? L(`${Math.round(player.goodFrames / Math.max(1, player.frames) * 100)}% arm visibility`, `手臂可见率 ${Math.round(player.goodFrames / Math.max(1, player.frames) * 100)}%`)
+                : L(`${Math.round(player.goodFrames / Math.max(1, player.frames) * 100)}% full-body visibility`, `全身可见率 ${Math.round(player.goodFrames / Math.max(1, player.frames) * 100)}%`)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {(calibration.phase === 'passed' || calibration.phase === 'failed') && <button className="btn subtle" onClick={beginCheck}>{T('Check again')}</button>}
+    </div>
+  )
 
   return (
     <section className="panel">
@@ -820,31 +862,15 @@ export default function WebcamPanel({
             {error && <p className="error">{error}</p>}
           </div>
         )}
-        {running && lobbyReady && framing.length > 0 && !checking && (
+        {running && lobbyReady && framing.length > 0 && !checking && !requireCalibration && (
           <div className="framing-warning">
             {framing.map((f) => (
               <p key={f}>{T(f)}</p>
             ))}
           </div>
         )}
-        {running && gamePhase === 'lobby' && lobbyReady && calibration && !checking && (
-          <div className="calibration-card" role="status" aria-live="polite">
-            <strong>{T(calibration.phase === 'framing' ? 'Checking full-body tracking' : calibration.phase === 'movement' ? 'Checking movement tracking' : calibration.phase === 'passed' ? 'Tracking check passed' : 'Tracking needs attention')}</strong>
-            <p>{T(calibration.phase === 'framing' ? 'Stand in your area with your whole body visible.' : calibration.phase === 'movement' ? 'Lower your right arm, then raise your right hand above your head.' : calibration.phase === 'passed' ? 'Your pose stayed visible and your right arm movement was detected.' : 'Adjust your camera setup and try again. You can still play with reduced tracking quality.')}</p>
-            {(calibration.phase === 'passed' || calibration.phase === 'failed') && (
-              <ul>
-                {calibration.players.map((player, index) => (
-                  <li key={index}>
-                    <b>{L(`Player ${index + 1}`, `玩家 ${index + 1}`)}</b>
-                    <span>{player.reason ? T(CALIBRATION_ADVICE[player.reason]) : L(`${Math.round(player.goodFrames / Math.max(1, player.frames) * 100)}% full-body visibility`, `全身可见率 ${Math.round(player.goodFrames / Math.max(1, player.frames) * 100)}%`)}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {(calibration.phase === 'passed' || calibration.phase === 'failed') && <button className="btn subtle" onClick={beginCheck}>{T('Check again')}</button>}
-          </div>
-        )}
-        {running && lobbyReady && trackingLost && (
+        {!requireCalibration && calibrationGuide}
+        {running && lobbyReady && trackingLost && !requireCalibration && (
           <div className="tracking-lock-warning" role="status">
             {T('Tracking lost — return to your area and hold your right hand up to relock.')}
           </div>
@@ -854,7 +880,7 @@ export default function WebcamPanel({
             <Checkup read={() => latestRef.current} onClose={() => setChecking(false)} />
           </div>
         )}
-        {running && lobbyReady && !checking && (
+        {running && lobbyReady && !checking && !requireCalibration && (
           <div className="score-badge">
             <span className="score-num">{score ?? '—'}</span>
             <span className="score-label">{T('match')}</span>
@@ -865,18 +891,23 @@ export default function WebcamPanel({
             )}
           </div>
         )}
-        {running && lobbyReady && gestureContext && !checking && calibration?.phase !== 'framing' && calibration?.phase !== 'movement' && (
+        {running && lobbyReady && gestureContext && !checking && calibration?.phase !== 'framing' && calibration?.phase !== 'movement' && (!requireCalibration || gestureFeedback.gesture) && (
           <div className={`gesture-command${gestureFeedback.gesture ? '' : ' is-idle'}`} aria-live="polite">
             <strong>{gestureFeedback.gesture ? T(gestureLabel(gestureFeedback.gesture, gestureContext)) : T('Gesture controls ready')}</strong>
             <span>
               {gestureFeedback.gesture
-                ? gestureFeedback.progress >= 1 ? T('Return to neutral') : T('Hold steady')
+                ? gestureFeedback.progress >= 1
+                  ? gestureFeedback.gesture === 'previous' || gestureFeedback.gesture === 'next'
+                    ? L('Keep holding to browse · lower to stop', '保持姿势继续浏览 · 放下即停止')
+                    : T('Return to neutral')
+                  : T('Hold steady')
                 : gestureContext === 'results' ? T('Right hand: replay · cross arms: songs') : T('Make a navigation gesture')}
             </span>
             <i style={{ transform: `scaleX(${gestureFeedback.progress})` }} />
           </div>
         )}
-        {running && metrics && (
+        {gamePhase === 'playing' && pauseProgress > 0 && <div className="pause-gesture-progress" role="status">{T('Hold crossed arms to pause')} <i style={{ transform: `scaleX(${pauseProgress})` }} /></div>}
+        {running && metrics && !requireCalibration && (
           <div className="tracking-diagnostics">
             {capture.width}×{capture.height} · camera {metrics.cameraFps} fps · tracking{' '}
             {metrics.trackingFps} fps
@@ -884,6 +915,8 @@ export default function WebcamPanel({
           </div>
         )}
       </div>
+
+      {requireCalibration && calibrationGuide}
 
       <div className="controls">
         <div className="ctrl-group">
@@ -903,8 +936,8 @@ export default function WebcamPanel({
           {running && gamePhase === 'lobby' && lobbyReady && !requireCalibration && (calibration?.phase !== 'framing' && calibration?.phase !== 'movement') && (
             <button className="btn" onClick={beginCheck}>{T('Check tracking')}</button>
           )}
-          <span className="ctrl-label">{T('Practise')}</span>
-          {(
+          {!requireCalibration && <span className="ctrl-label">{T('Practise')}</span>}
+          {!requireCalibration && (
             [
               ['full', T('Whole body'), T('Score everything')],
               ['upper', T('Arms only'), T('Only arms and head are scored — your legs need not be in frame')],
@@ -920,36 +953,36 @@ export default function WebcamPanel({
               {label}
             </button>
           ))}
-          {import.meta.env.DEV && running && !checking && (
-            <button className="btn subtle" onClick={() => setChecking(true)} title={T('Follow a few poses so the scoring can be checked against known answers')}>
+          {import.meta.env.DEV && running && !checking && !requireCalibration && (
+            <button className="btn subtle" onClick={() => setChecking(true)} title={T('Try a few moves to check scoring')}>
               {T('Check accuracy')}
             </button>
           )}
           {/* Auto is right almost always, so this is one button that reports
               what it decided rather than three that ask you to decide. */}
-          <button
+          {!requireCalibration && <button
             className={`btn subtle ${mirrorMode === 'auto' ? '' : 'active'}`}
             onClick={() =>
               setMirrorMode(
                 mirrorMode === 'auto' ? 'mirror' : mirrorMode === 'mirror' ? 'direct' : 'auto',
               )
             }
-            title={T('Whether your left should mirror the dancer, or match their side. Auto reads which way they are facing.')}
+            title={T('Choose whether your moves mirror the dancer. Auto follows their direction.')}
           >
             {mirrorMode === 'auto'
               ? `${T('Sides: auto')} · ${mirroredNow ? T('mirrored') : T('same side')}`
               : mirrorMode === 'mirror'
                 ? T('Sides: mirrored')
                 : T('Sides: same side')}
-          </button>
+          </button>}
         </div>
-        <div className="ctrl-group problems" aria-live="polite">
+        {!requireCalibration && <div className="ctrl-group problems" aria-live="polite">
           <span className="hint watch-message" title={problems.join('、')}>
             {running && problems.length > 0 ? (
               <>{T('Watch')}: <b>{problems.join('、')}</b></>
             ) : '\u00a0'}
           </span>
-        </div>
+        </div>}
       </div>
     </section>
   )

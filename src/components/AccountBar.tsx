@@ -173,7 +173,7 @@ function AccountDialog({
         <p className="acct-sub">
           {mode === 'forgot'
             ? "Enter the email you signed up with and we'll send a link to set a new password."
-            : 'An account remembers your dances and how you are improving, on any device. Your video never leaves this machine.'}
+            : 'Keep your dance list and Player 1 scores across devices. Add each video on the device where you play.'}
         </p>
 
         {mode !== 'forgot' && (

@@ -15,8 +15,8 @@ export default function UpdateToast() {
   }
   return (
     <aside className="update-toast" role="status">
-      <strong>{T(needRefresh ? 'Update ready' : 'Offline shell ready')}</strong>
-      <span>{T(needRefresh ? 'Reload when you are ready for the latest version.' : 'Prepared songs can keep working after tracking assets are cached.')}</span>
+      <strong>{T(needRefresh ? 'Update ready' : 'Ready to play offline')}</strong>
+      <span>{T(needRefresh ? 'Reload when you are ready for the latest version.' : 'Your prepared dances are ready when you are.')}</span>
       <div>
         {needRefresh && <button className="btn primary" onClick={() => void updateServiceWorker(true)}>{T('Reload')}</button>}
         <button className="btn subtle" onClick={close}>{T('Not now')}</button>

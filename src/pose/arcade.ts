@@ -200,6 +200,10 @@ export function drawCueGlyph(
     ctx.moveTo(endX, y)
     ctx.lineTo(endX - direction * radius * 0.34, y + radius * 0.3)
     ctx.stroke()
+    ctx.font = `800 ${Math.max(14, radius * 0.45)}px sans-serif`
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'top'
+    ctx.fillText('BODY', x, y + radius * 0.55)
   }
   ctx.restore()
 }

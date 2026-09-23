@@ -1,4 +1,4 @@
-export type AppScreen = 'home' | 'arcade' | 'practice' | 'library' | 'settings'
+export type AppScreen = 'attract' | 'tracking' | 'home' | 'arcade' | 'practice' | 'library' | 'settings'
 export type ArcadePhase = 'setup' | 'registration' | 'countdown' | 'playing' | 'paused' | 'results'
 
 export interface GameState {
@@ -8,6 +8,7 @@ export interface GameState {
 }
 
 export type GameAction =
+  | { type: 'wake' }
   | { type: 'openHome' }
   | { type: 'openArcade' }
   | { type: 'openPractice' }
@@ -26,14 +27,17 @@ export type GameAction =
   | { type: 'quitHome' }
 
 export const initialGameState: GameState = {
-  screen: 'home',
+  screen: 'attract',
   arcadePhase: 'setup',
   returnScreen: null,
 }
 
 export function gameReducer(state: GameState, action: GameAction): GameState {
   switch (action.type) {
+    case 'wake':
+      return { ...initialGameState, screen: 'tracking' }
     case 'openHome':
+      return { screen: 'home', arcadePhase: 'setup', returnScreen: null }
     case 'quitHome':
       return initialGameState
     case 'openArcade':

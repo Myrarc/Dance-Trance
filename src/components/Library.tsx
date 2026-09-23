@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { formatDuration, type LibraryEntry } from '../lib/library'
-import { T } from '../i18n'
+import { T, L } from '../i18n'
 import type { VideoStats } from '../playkitClient'
 import type { ArcadeRecord } from '../game/records'
 
@@ -11,6 +11,7 @@ interface Props {
   currentId: string | null
   selectedId?: string | null
   onOpen: (entry: LibraryEntry) => void
+  onPreview?: (entry: LibraryEntry) => void
   onForget: (entry: LibraryEntry) => void
   /** Shown when the list is empty, i.e. before anything has been loaded. */
   emptyHint?: string
@@ -25,7 +26,7 @@ function when(ts: number): string {
   return `${Math.floor(days / 30)}mo ago`
 }
 
-export default function Library({ entries, stats, records = [], currentId, selectedId, onOpen, onForget, emptyHint }: Props) {
+export default function Library({ entries, stats, records = [], currentId, selectedId, onOpen, onPreview, onForget, emptyHint }: Props) {
   const bestByVideo = useMemo(() => {
     const best = new Map<string, ArcadeRecord>()
     for (const record of records) {
@@ -45,6 +46,7 @@ export default function Library({ entries, stats, records = [], currentId, selec
         const s = stats.get(entry.id)
         const best = bestByVideo.get(entry.id)
         const missing = !entry.hasVideo
+        const title = entry.name.replace(/\.[^.]+$/, '')
         return (
           <li
             key={entry.id}
@@ -52,6 +54,10 @@ export default function Library({ entries, stats, records = [], currentId, selec
           >
             <button
               className="library-open"
+              data-track-id={entry.id}
+              data-gesture-label={title}
+              data-needs-file={missing ? true : undefined}
+              onFocus={() => onPreview?.(entry)}
               onClick={() => onOpen(entry)}
               aria-current={entry.id === selectedId ? 'true' : undefined}
               title={missing ? `${entry.name} — pick this file again to reload it` : entry.name}
@@ -61,9 +67,9 @@ export default function Library({ entries, stats, records = [], currentId, selec
                 {entry.duration > 0 && <span className="library-time">{formatDuration(entry.duration)}</span>}
               </span>
               <span className="library-meta">
-                <span className="library-name">{entry.name}</span>
+                <span className="library-name">{title}</span>
                 <span className="library-sub">
-                  {missing ? T('not on this device') : when(entry.lastOpenedAt)}
+                  {missing ? L('Add video again to play', '重新添加视频以开始游戏') : when(entry.lastOpenedAt)}
                   {s ? ` · ${Math.max(1, Math.round(s.seconds / 60))} min · best ${s.bestMatch}` : ''}
                   {best ? ` · ${T('record')} ${best.bestScore.toLocaleString()} · ${T('grade')} ${best.bestGrade}` : ''}
                 </span>
@@ -71,6 +77,7 @@ export default function Library({ entries, stats, records = [], currentId, selec
             </button>
             <button
               className="library-forget"
+              data-gesture-skip
               onClick={() => onForget(entry)}
               title={T('Remove from library')}
               aria-label={`Remove ${entry.name} from library`}

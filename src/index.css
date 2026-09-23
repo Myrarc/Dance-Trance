@@ -2158,6 +2158,14 @@ input[type='range'] { accent-color: var(--accent); }
   text-transform: uppercase;
 }
 
+.home-copy h1 {
+  font-family: inherit;
+  font-size: clamp(48px, 5.5vw, 78px);
+  font-weight: 900;
+  line-height: .98;
+  letter-spacing: -.035em;
+}
+
 .home-copy p,
 .track-picker-copy p,
 .setup-poster p {
@@ -2195,27 +2203,40 @@ input[type='range'] { accent-color: var(--accent); }
 .home-poster::before {
   content: '';
   position: absolute;
-  inset: 9%;
+  top: 50%;
+  left: 50%;
   z-index: -1;
+  width: 72%;
+  aspect-ratio: 1;
   border: 4px solid var(--ink);
+  border-radius: 50%;
   background: repeating-linear-gradient(-45deg, var(--warn) 0 13px, var(--cyan) 13px 26px);
-  clip-path: polygon(50% 0, 100% 35%, 82% 100%, 18% 100%, 0 35%);
+  transform: translate(-50%, -50%);
 }
 
 .home-poster strong {
+  position: absolute;
+  top: 50%;
+  left: 50%;
   color: var(--panel);
-  font-family: 'Trance Display', Impact, sans-serif;
-  font-size: clamp(95px, 16vw, 210px);
-  line-height: .7;
+  font-size: clamp(80px, 10vw, 150px);
+  font-weight: 950;
+  line-height: 1;
+  white-space: nowrap;
   text-shadow: 7px 7px 0 var(--ink);
+  transform: translate(-50%, -50%);
 }
 
 .home-poster small {
+  position: absolute;
+  bottom: 8%;
+  left: 50%;
   padding: 5px 9px;
   border: 3px solid var(--ink);
   background: var(--warn);
   font-weight: 950;
   letter-spacing: .17em;
+  transform: translateX(-50%);
 }
 
 .home-poster > i {
@@ -2230,8 +2251,11 @@ input[type='range'] { accent-color: var(--accent); }
 
 .poster-ring {
   position: absolute;
+  top: 50%;
+  left: 50%;
   border: 4px solid var(--panel);
   border-radius: 50%;
+  transform: translate(-50%, -50%);
 }
 
 .ring-one { width: 90%; aspect-ratio: 1; }
@@ -2331,7 +2355,7 @@ input[type='range'] { accent-color: var(--accent); }
 }
 
 .setup-poster { padding: clamp(28px, 6vw, 76px); background: var(--warn); }
-.setup-poster h1 { max-width: 14ch; overflow-wrap: anywhere; font-size: clamp(46px, 8vw, 104px); }
+.setup-poster h1 { max-width: 20ch; overflow-wrap: anywhere; font-family: inherit; font-size: clamp(34px, 4.4vw, 64px); font-weight: 900; line-height: 1.05; letter-spacing: -.03em; text-transform: none; }
 .setup-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 26px; }
 .setup-privacy { display: grid; gap: 8px; padding: 24px; background: var(--cyan); transform: rotate(1.5deg); }
 .setup-privacy strong { font-family: 'Trance Display', Impact, sans-serif; font-size: 28px; text-transform: uppercase; }
@@ -2399,9 +2423,9 @@ input[type='range'] { accent-color: var(--accent); }
 .setting-row small { font-weight: 650; line-height: 1.35; }
 .setting-row input { position: absolute; opacity: 0; }
 .setting-row > i { position: relative; width: 54px; height: 30px; border: 3px solid var(--ink); border-radius: 20px; background: var(--panel-soft); }
-.setting-row > i::after { content: ''; position: absolute; top: 3px; left: 4px; width: 18px; height: 18px; border: 2px solid var(--ink); border-radius: 50%; background: var(--panel); transition: transform 120ms ease; }
+.setting-row > i::after { content: ''; position: absolute; top: 50%; left: 3px; width: 18px; height: 18px; border: 2px solid var(--ink); border-radius: 50%; background: var(--panel); transform: translateY(-50%); transition: transform 120ms ease; }
 .setting-row input:checked + i { background: var(--warn); }
-.setting-row input:checked + i::after { transform: translateX(23px); background: var(--accent); }
+.setting-row input:checked + i::after { transform: translate(24px, -50%); background: var(--accent); }
 .setting-row input:focus-visible + i { outline: 3px solid var(--accent); outline-offset: 3px; }
 
 .library-screen { overflow: auto; }
@@ -2466,7 +2490,7 @@ input[type='range'] { accent-color: var(--accent); }
   .home-account { display: none; }
   .home-hero { grid-template-columns: 1fr; }
   .home-poster { display: none; }
-  .home-copy h1 { font-size: clamp(58px, 17vw, 94px); }
+  .home-copy h1 { font-size: clamp(48px, 8vw, 68px); }
   .mode-grid { grid-template-columns: 1fr; }
   .mode-card { min-height: 118px; }
   .destination-wrap { padding: 10px; }
@@ -2486,7 +2510,7 @@ input[type='range'] { accent-color: var(--accent); }
   .brand-lockup { font-size: 27px; }
   .app-header .screen-label { display: none; }
   .app-header nav .account { display: none; }
-  .home-copy h1 { font-size: 58px; }
+  .home-copy h1 { font-size: clamp(36px, 9vw, 50px); }
   .home-play { min-width: 0; width: 100%; }
   .track-picker h1 { font-size: 54px; }
   .destination-screen { padding: 18px; }
@@ -2521,3 +2545,429 @@ input[type='range'] { accent-color: var(--accent); }
 .update-toast strong { font-family: 'Trance Display', Impact, sans-serif; font-size: 23px; text-transform: uppercase; }
 .update-toast span { font-size: 13px; font-weight: 700; line-height: 1.35; }
 .update-toast > div { display: flex; gap: 9px; margin-top: 4px; }
+
+/* Registration puts the camera and its tracking instructions first. */
+.game-lobby {
+  align-items: center;
+  gap: 12px 18px;
+}
+
+.game-lobby .registration-status { flex: 1 0 100%; min-width: 0; }
+.game-lobby .registration-status strong { font-size: clamp(22px, 2vw, 30px); line-height: 1.1; }
+.game-lobby .registration-status span { color: var(--ink); font-size: clamp(16px, 1.2vw, 20px); font-weight: 700; line-height: 1.35; }
+.game-lobby .difficulty-picker { flex: 0 1 auto; }
+.game-lobby .tracking-focus-picker { grid-template-columns: repeat(3, minmax(100px, 1fr)); }
+.game-lobby .difficulty-option { min-height: 48px; font-family: inherit; font-size: 16px; font-weight: 850; letter-spacing: 0; text-transform: none; }
+.game-lobby > .btn { min-height: 48px; font-size: 16px; }
+
+.panels.calibration-active {
+  --calibration-side: clamp(260px, 24vw, 360px);
+  grid-template-columns: minmax(0, 1fr) var(--calibration-side);
+  align-items: start;
+}
+
+.panels.calibration-active > .panel:first-child {
+  grid-column: 2;
+  grid-row: 1;
+  min-height: 0;
+  padding: 8px;
+}
+
+.panels.calibration-active > .panel:first-child .stage { flex: none; min-height: 0; aspect-ratio: 16 / 9; }
+.panels.calibration-active > .panel:first-child .panel-head .hint,
+.panels.calibration-active > .panel:first-child .transport,
+.panels.calibration-active > .panel:first-child .controls { display: none; }
+
+.panels.calibration-active > .panel:nth-child(2) {
+  position: relative;
+  grid-column: 1;
+  grid-row: 1;
+  min-height: min(70vh, 720px);
+}
+
+.panels.calibration-active .webcam-stage { min-height: min(60vh, 620px); }
+.panels.calibration-active .player-zone { background: rgba(48, 35, 63, .25); }
+.panels.calibration-active .player-zone strong { font-family: inherit; font-size: 22px; font-weight: 900; }
+.panels.calibration-active .player-zone span { font-size: 18px; font-weight: 800; }
+.panels.calibration-active .controls { min-height: 0; }
+.panels.calibration-active .controls .btn { min-height: 44px; font-size: 15px; }
+
+.panels.calibration-active .calibration-card {
+  top: calc(var(--calibration-side) * 9 / 16 + 58px);
+  right: auto;
+  left: calc(100% + 14px);
+  width: var(--calibration-side);
+  max-height: min(55vh, 500px);
+  padding: 18px;
+  background: var(--panel);
+}
+
+.panels.calibration-active .calibration-card > strong {
+  font-family: inherit;
+  font-size: 23px;
+  font-weight: 900;
+  line-height: 1.1;
+  letter-spacing: -.02em;
+  text-transform: none;
+}
+
+.panels.calibration-active .calibration-card p,
+.panels.calibration-active .calibration-card li { font-size: 17px; line-height: 1.4; }
+.panels.calibration-active .calibration-card .btn { min-height: 44px; font-size: 16px; }
+
+@media (max-width: 900px) {
+  .game-lobby .difficulty-picker { flex: 1 1 230px; }
+  .game-lobby .tracking-focus-picker { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .game-lobby > .btn { flex: 1 1 150px; width: auto; }
+
+  .panels.calibration-active { position: relative; display: flex; flex-direction: column; }
+  .panels.calibration-active > .panel:nth-child(2) { order: 1; width: 100%; min-height: 0; }
+  .panels.calibration-active .webcam-stage { flex: none; min-height: min(58vh, 520px); }
+  .panels.calibration-active > .panel:first-child {
+    position: absolute;
+    z-index: 5;
+    top: 48px;
+    right: 14px;
+    width: clamp(120px, 28vw, 180px);
+    padding: 4px;
+  }
+  .panels.calibration-active > .panel:first-child .panel-head { display: none; }
+  .panels.calibration-active .calibration-card {
+    position: static;
+    width: 100%;
+    max-height: none;
+    margin: 0;
+  }
+}
+
+/* The arcade wakes before it requests a camera. */
+.attract-screen {
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: auto minmax(280px, 1fr) auto auto;
+  gap: 24px;
+  padding: clamp(20px, 4vw, 54px);
+  background: var(--ink);
+  color: var(--panel);
+  text-align: center;
+  cursor: pointer;
+}
+.attract-screen .brand-lockup { justify-self: center; }
+.attract-demo {
+  position: relative;
+  overflow: hidden;
+  border: 5px solid var(--panel);
+  border-radius: 12px;
+  background: repeating-linear-gradient(135deg, var(--accent) 0 80px, var(--warn) 80px 160px);
+  box-shadow: 12px 12px 0 var(--cyan);
+}
+.attract-demo::after { content: ''; position: absolute; inset: 12%; border: 5px solid var(--panel); border-radius: 50%; }
+.demo-player {
+  position: absolute;
+  z-index: 1;
+  bottom: 21%;
+  display: grid;
+  place-items: center;
+  width: clamp(96px, 15vw, 210px);
+  aspect-ratio: 1;
+  border: 6px solid var(--ink);
+  border-radius: 50%;
+  background: var(--cyan);
+  color: var(--ink);
+  font-size: clamp(44px, 7vw, 96px);
+  font-weight: 950;
+  box-shadow: 8px 8px 0 var(--ink);
+  animation: attract-bounce 1.8s ease-in-out infinite;
+}
+.demo-one { left: 22%; }
+.demo-two { right: 22%; background: var(--lilac); animation-delay: -.9s; }
+.demo-hit, .demo-combo {
+  position: absolute;
+  z-index: 2;
+  padding: 8px 16px;
+  border: 4px solid var(--ink);
+  background: var(--panel);
+  color: var(--ink);
+  font-family: 'Trance Display', Impact, sans-serif;
+  font-size: clamp(25px, 4vw, 58px);
+  box-shadow: 6px 6px 0 var(--ink);
+  animation: attract-bounce 1.8s ease-in-out infinite;
+}
+.demo-hit { top: 16%; left: 12%; transform: rotate(-5deg); }
+.demo-combo { top: 35%; right: 10%; background: var(--warn); animation-delay: -.9s; }
+.demo-rail { position: absolute; z-index: 2; right: 8%; bottom: 7%; left: 8%; display: flex; justify-content: space-around; border-top: 8px solid var(--ink); }
+.demo-rail i { width: 9%; height: 20px; margin-top: -14px; border: 3px solid var(--ink); background: var(--panel); }
+.attract-start {
+  justify-self: center;
+  padding: 14px 28px;
+  border: 4px solid var(--panel);
+  border-radius: 7px;
+  background: var(--warn);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: clamp(22px, 3vw, 38px);
+  font-weight: 950;
+  letter-spacing: .08em;
+  box-shadow: 7px 7px 0 var(--cyan);
+  animation: coin-pulse 1.2s steps(2, end) infinite;
+  cursor: pointer;
+}
+.attract-screen > p { font-size: 18px; font-weight: 800; }
+@keyframes attract-bounce { 50% { translate: 0 -10px; } }
+@keyframes coin-pulse { 50% { background: var(--cyan); } }
+
+.tracking-screen { min-height: 100vh; padding: 22px max(24px, 5vw); }
+.tracking-screen h1 { font-size: clamp(34px, 5vw, 64px); line-height: 1; }
+.tracking-screen p { max-width: 80ch; margin-top: 8px; font-size: clamp(17px, 1.5vw, 23px); font-weight: 800; line-height: 1.3; }
+.tracking-player-choice { display: flex; gap: 10px; margin-top: 12px; }
+
+.camera-dock {
+  position: fixed;
+  z-index: 35;
+  right: 22px;
+  bottom: 100px;
+  width: min(300px, 28vw);
+}
+.camera-dock.camera-off:not(.camera-tracking):not(.camera-registration) { display: none; }
+.camera-dock > .panel { position: relative; min-height: 0; padding: 6px; }
+.camera-dock .panel-head, .camera-dock .controls { display: none; }
+.camera-dock .webcam-stage { flex: none; width: 100%; min-height: 0; aspect-ratio: 16 / 9; }
+.camera-dock .tracking-diagnostics, .camera-dock .framing-warning, .camera-dock .tracking-lock-warning, .camera-dock .score-badge { display: none; }
+.camera-dock .player-lobby { padding: 5px; }
+.camera-dock .player-zone { padding: 7px; }
+.camera-dock .player-zone span { font-size: 12px; }
+.camera-dock .gesture-command { bottom: 4px; min-width: 0; max-width: calc(100% - 8px); padding: 4px; }
+.camera-dock .gesture-command strong { font-size: 14px; }
+.camera-dock .gesture-command span { display: none; }
+
+.camera-tracking {
+  top: clamp(190px, 26vh, 260px);
+  right: 5vw;
+  bottom: 5vh;
+  left: 5vw;
+  width: auto;
+}
+.camera-tracking > .panel { height: 100%; }
+.camera-tracking .panel-head { display: flex; }
+.camera-tracking .controls { display: none; }
+.camera-tracking .webcam-stage { flex: 1; min-height: 45vh; aspect-ratio: auto; }
+.camera-tracking .player-lobby { padding: 22px; }
+.camera-tracking .player-zone { padding: 18px; }
+.camera-tracking .player-zone strong { font-family: inherit; font-size: 30px; }
+.camera-tracking .player-zone span { font-size: 23px; }
+
+.camera-registration {
+  top: clamp(230px, 25vh, 290px);
+  right: 390px;
+  bottom: 24px;
+  left: 20px;
+  width: auto;
+}
+.camera-registration > .panel { height: 100%; }
+.camera-registration .panel-head, .camera-registration .controls { display: flex; }
+.camera-registration .webcam-stage { flex: 1; min-height: 45vh; aspect-ratio: auto; }
+.camera-registration .player-zone { padding: 18px; }
+.camera-registration .player-zone strong { font-family: inherit; font-size: 26px; }
+.camera-registration .player-zone span { font-size: 20px; }
+.camera-registration .calibration-card {
+  top: 215px;
+  right: auto;
+  left: calc(100% + 18px);
+  width: 340px;
+  max-height: min(55vh, 480px);
+  padding: 18px;
+}
+.camera-registration .calibration-card strong { font-family: inherit; font-size: 23px; text-transform: none; }
+.camera-registration .calibration-card p, .camera-registration .calibration-card li { font-size: 17px; line-height: 1.4; }
+.camera-registration .gesture-command { display: none; }
+.panels.calibration-active { flex: 0 0 auto; }
+.panels.calibration-active > .panel:first-child { width: 350px; justify-self: end; }
+
+.camera-countdown, .camera-playing { top: 16px; right: 16px; bottom: auto; width: clamp(170px, 18vw, 250px); }
+.camera-setup { top: auto; right: 16px; bottom: 16px; left: auto; width: clamp(150px, 16vw, 220px); }
+.camera-countdown .webcam-stage, .camera-playing .webcam-stage { aspect-ratio: 16 / 9; }
+.camera-results { z-index: 90; top: 50%; right: 3vw; bottom: auto; width: 46vw; transform: translateY(-50%); }
+.camera-results .webcam-stage { aspect-ratio: 16 / 9; }
+.camera-results .gesture-command span { display: block; }
+.camera-practice { top: 110px; right: 2vw; bottom: 100px; width: 46vw; }
+.camera-practice > .panel { height: 100%; }
+.camera-practice .webcam-stage { flex: 1; aspect-ratio: auto; }
+.camera-practice .controls, .camera-practice .panel-head { display: flex; }
+.panels:not(.game-active):not(.calibration-active):not(.game-results-stage) { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+
+.menu-gesture-hud {
+  position: fixed;
+  z-index: 140;
+  bottom: 18px;
+  left: 18px;
+  display: grid;
+  gap: 4px;
+  max-width: min(840px, calc(100vw - 36px));
+  padding: 12px 18px;
+  border: 4px solid var(--ink);
+  border-radius: 8px;
+  background: var(--cyan);
+  color: var(--ink);
+  box-shadow: 7px 7px 0 var(--ink);
+}
+.menu-gesture-hud b { font-size: 14px; letter-spacing: .1em; }
+.menu-gesture-hud span { font-size: clamp(20px, 2vw, 28px); font-weight: 900; }
+.menu-gesture-hud small { font-size: 15px; font-weight: 750; }
+[data-gesture-selected] { outline: 6px solid var(--cyan) !important; outline-offset: 4px; box-shadow: 0 0 0 5px var(--ink), 8px 8px 0 var(--ink) !important; }
+.pause-gesture-progress { position: absolute; right: 4px; bottom: 4px; left: 4px; padding: 4px; background: var(--warn); font-size: 12px; font-weight: 900; text-align: center; }
+.pause-gesture-progress i { display: block; height: 5px; margin-top: 3px; background: var(--cyan); transform-origin: left; }
+.camera-paused { z-index: 130; right: 16px; bottom: 16px; width: min(250px, 25vw); }
+
+.home-screen { grid-template-rows: auto auto 1fr auto; align-content: start; gap: 18px; }
+.home-hero { display: block; margin: 0; }
+.home-copy h1 { margin: 4px 0 8px; font-size: clamp(38px, 5vw, 66px); }
+.home-copy p { margin: 0 0 16px; }
+.home-play { max-width: 360px; margin-top: 0; }
+.mode-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); align-content: start; }
+.mode-card { min-height: 145px; padding: 18px 35px 18px 18px; }
+.mode-card > strong { font-family: inherit; font-size: clamp(20px, 2vw, 30px); font-weight: 950; line-height: 1.1; }
+.track-picker h1, .picker-library h2 { font-family: inherit; font-weight: 950; letter-spacing: -.025em; line-height: 1; }
+.track-picker h1 { font-size: clamp(38px, 5vw, 68px); }
+.picker-library h2 { font-size: clamp(24px, 3vw, 36px); }
+
+@media (max-width: 900px) {
+  .mode-grid { grid-template-columns: 1fr 1fr; }
+  .mode-card { min-height: 130px; }
+  .attract-demo { min-height: 280px; }
+  .demo-one { left: 10%; } .demo-two { right: 10%; }
+  .tracking-screen { padding: 18px; }
+  .camera-tracking { top: 260px; right: 12px; bottom: 10px; left: 12px; }
+  .camera-registration { top: 340px; right: 12px; bottom: 12px; left: 12px; }
+  .camera-registration .webcam-stage { min-height: 45vh; }
+  .camera-registration .calibration-card { position: static; width: 100%; max-height: none; }
+  .panels.calibration-active > .panel:first-child { width: clamp(120px, 28vw, 180px); }
+  .camera-practice { top: auto; right: 12px; bottom: 120px; width: min(240px, 40vw); height: auto; }
+  .camera-practice .webcam-stage { flex: none; aspect-ratio: 16 / 9; }
+  .camera-practice .controls, .camera-practice .panel-head { display: none; }
+  .camera-home, .camera-library, .camera-settings { top: 10px; right: 10px; bottom: auto; width: 120px; }
+  .camera-setup { right: 10px; bottom: 10px; width: 120px; }
+  .camera-home .player-lobby, .camera-library .player-lobby, .camera-setup .player-lobby, .camera-settings .player-lobby { display: none; }
+  .menu-gesture-hud small { font-size: 12px; }
+}
+@media (max-width: 560px) {
+  .mode-grid { grid-template-columns: 1fr; }
+  .mode-card { min-height: 105px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .demo-player, .demo-hit, .demo-combo, .attract-start { animation: none; }
+}
+
+/* Song selection is the stage: large covers, one obvious active track, and a short local preview. */
+.track-picker {
+  width: min(1720px, calc(100% - 32px));
+  min-height: calc(100vh - 160px);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 24px;
+  padding: clamp(22px, 3vw, 46px);
+  border: 0;
+  background: transparent;
+}
+.track-picker.over { outline: 5px dashed var(--ink); outline-offset: -5px; }
+.picker-heading { text-align: center; }
+.picker-heading h1 { margin: 0; font-family: inherit; font-size: clamp(40px, 5vw, 82px); font-weight: 950; line-height: 1; }
+.picker-heading p { margin: 8px 0 0; font-size: clamp(18px, 1.5vw, 26px); font-weight: 800; }
+.picker-stage { display: grid; grid-template-columns: minmax(0, 1fr) minmax(250px, 25%); align-items: center; gap: 24px; min-width: 0; }
+.track-picker .library {
+  display: flex;
+  justify-content: safe center;
+  align-items: center;
+  gap: 18px;
+  min-height: 400px;
+  padding: 26px 16px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scrollbar-color: var(--ink) transparent;
+}
+.track-picker .library-item { flex: 0 0 clamp(225px, 20vw, 320px); scroll-snap-align: center; border: 4px solid var(--ink); background: var(--panel); box-shadow: 8px 8px 0 var(--ink); }
+.track-picker .library-item.is-gesture-selected { background: var(--warn); }
+.track-picker .library-item.is-gesture-selected { animation: none; }
+.track-picker .library-open { display: grid; gap: 12px; padding: 12px; min-height: 320px; align-content: start; }
+.track-picker .library-thumb { width: 100%; height: auto; aspect-ratio: 16 / 10; border: 3px solid var(--ink); }
+.track-picker .library-name { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; white-space: normal; text-transform: none; letter-spacing: normal; font-family: inherit; font-size: clamp(22px, 2vw, 34px); font-weight: 950; line-height: 1.05; overflow-wrap: anywhere; }
+.track-picker .library-sub { font-size: 16px; font-weight: 800; line-height: 1.2; }
+.track-picker .library-forget { top: 16px; right: 16px; background: var(--panel); }
+.picker-preview { display: grid; gap: 10px; min-width: 0; padding: 12px; border: 4px solid var(--ink); border-radius: 10px; background: var(--cyan); box-shadow: 8px 8px 0 var(--ink); }
+.picker-preview-media { position: relative; overflow: hidden; aspect-ratio: 16 / 9; border: 3px solid var(--ink); background: var(--ink); }
+.picker-preview-media video, .picker-preview-media img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.picker-preview > strong { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; font-size: clamp(20px, 2vw, 30px); font-weight: 950; line-height: 1.1; overflow-wrap: anywhere; }
+.picker-preview > span { font-size: 16px; font-weight: 800; }
+.preview-play { position: absolute; inset: auto 12px 12px; width: calc(100% - 24px); }
+.picker-import { display: flex; align-items: center; justify-content: center; gap: 18px; }
+.picker-import .btn { min-height: 62px; font-size: 22px; }
+.picker-import span { max-width: 36ch; font-size: 16px; font-weight: 800; line-height: 1.2; }
+
+/* A selected option stays unmistakable across a room while it waits for a pose. */
+[data-gesture-selected] {
+  z-index: 1;
+  position: relative;
+  outline: 8px solid var(--accent) !important;
+  outline-offset: 5px;
+  box-shadow: 0 0 0 5px var(--panel), 12px 12px 0 var(--ink) !important;
+  animation: gesture-selection 1.1s steps(2, end) infinite;
+}
+.mode-card[data-gesture-selected], .track-picker .library-open[data-gesture-selected] { transform: scale(1.045); }
+.mode-card[data-gesture-selected]::after, .track-picker .library-open[data-gesture-selected]::after {
+  content: attr(data-selection-label); position: absolute; top: -18px; right: 10px; padding: 4px 10px;
+  border: 3px solid var(--ink); background: var(--accent); color: var(--ink);
+  font-size: 15px; font-weight: 950; letter-spacing: .08em;
+}
+@keyframes gesture-selection { 50% { outline-color: var(--warn); } }
+.menu-gesture-hud { max-width: min(720px, calc(100vw - 36px)); gap: 2px; padding: 10px 16px; }
+.menu-gesture-hud b { font-size: 18px; }
+.menu-gesture-hud span { overflow: hidden; font-size: clamp(30px, 3vw, 48px); text-overflow: ellipsis; white-space: nowrap; }
+.menu-gesture-hud small { font-size: 18px; }
+.camera-home .gesture-command, .camera-library .gesture-command, .camera-setup .gesture-command, .camera-practice .gesture-command { display: none; }
+
+/* The full library reads as a game shelf, with a separate camera rail. */
+.library-screen {
+  width: min(1500px, calc(100% - 340px));
+  margin: 20px 0 0 20px;
+  padding: clamp(24px, 3vw, 44px);
+  overflow: visible;
+}
+.library-screen .screen-title-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 24px; }
+.library-screen .screen-title-row h1 { margin: 0; font-family: inherit; font-size: clamp(42px, 4vw, 68px); font-weight: 950; line-height: 1; }
+.library-screen .screen-title-row .btn { min-height: 60px; padding: 10px 22px; font-size: 20px; }
+.library-screen .library { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.library-screen .library-item { min-width: 0; border-width: 4px !important; box-shadow: 8px 8px 0 var(--ink); }
+.library-screen .library-open { display: grid; align-content: start; gap: 12px; min-height: 320px; padding: 12px; }
+.library-screen .library-thumb { width: 100%; height: auto; aspect-ratio: 16 / 9; border: 3px solid var(--ink); }
+.library-screen .library-name { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; white-space: normal; text-transform: none; letter-spacing: normal; font-family: inherit; font-size: clamp(20px, 1.7vw, 30px); font-weight: 900; line-height: 1.1; overflow-wrap: anywhere; }
+.library-screen .library-sub { font-size: 16px; font-weight: 800; }
+.library-screen .library-forget { top: 16px; right: 16px; background: var(--panel); }
+.camera-library { top: 120px; right: 18px; bottom: auto; width: clamp(180px, 20vw, 260px); }
+
+@media (max-width: 900px) {
+  .track-picker { width: calc(100% - 24px); gap: 12px; padding: 18px; }
+  .picker-stage { grid-template-columns: 1fr; gap: 12px; }
+  .track-picker .library { justify-content: safe center; min-height: 0; padding: 18px 8px; }
+  .track-picker .library-item { flex-basis: min(72vw, 310px); }
+  .track-picker .library-open { min-height: 260px; }
+  .picker-preview { grid-template-columns: minmax(120px, 35%) minmax(0, 1fr); align-items: center; }
+  .picker-preview-media { grid-row: span 2; }
+  .picker-import { flex-wrap: wrap; text-align: center; }
+  .picker-import span { display: none; }
+  .menu-gesture-hud { bottom: 10px; left: 10px; max-width: calc(100vw - 20px); }
+  .menu-gesture-hud small { display: none; }
+  .library-screen { width: calc(100% - 24px); margin: 12px; padding: 18px; }
+  .library-screen .library { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .camera-library { top: 10px; right: 10px; width: 120px; }
+}
+@media (max-width: 560px) {
+  .library-screen .library { grid-template-columns: 1fr; }
+  .library-screen .library-open { min-height: 0; }
+  .library-screen .screen-title-row { align-items: flex-start; }
+  .library-screen .screen-title-row h1 { font-size: 36px; }
+  .library-screen .screen-title-row .btn { min-height: 50px; padding: 8px 10px; font-size: 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-gesture-selected] { animation: none; }
+  .mode-card[data-gesture-selected], .track-picker .library-open[data-gesture-selected] { transform: none; }
+}

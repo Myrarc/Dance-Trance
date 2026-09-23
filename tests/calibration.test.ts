@@ -45,6 +45,19 @@ test('rejects an apparently detected pose when a scoring joint is occluded or of
   assert.equal(assessCalibrationPose(dancer(), 0, 1).reason, null)
 })
 
+test('arms-only calibration accepts clipped legs but still requires visible arms', () => {
+  const pose = dancer()
+  pose[LM.lKnee].visibility = 0.1
+  pose[LM.rAnkle].y = 1.02
+  assert.equal(assessCalibrationPose(pose, 0, 1, true, 'full').reason, 'feet')
+  assert.equal(assessCalibrationPose(pose, 0, 1, true, 'upper').reason, null)
+  let state = beginCalibration(1, 0, 'upper')
+  for (let time = 0; time <= 2400; time += 50) state = advanceCalibration(state, [pose], time)
+  assert.equal(state.phase, 'movement')
+  pose[LM.rWrist].visibility = 0.1
+  assert.equal(assessCalibrationPose(pose, 0, 1, true, 'upper').reason, 'arms')
+})
+
 test('passes only after reliable framing and an observed right arm down-then-up movement', () => {
   let state = beginCalibration(1, 0)
   for (let time = 0; time <= 2400; time += 50) state = advanceCalibration(state, [dancer()], time)
@@ -139,4 +152,5 @@ test('starts only for the calibrated number of visible players, unless failure i
   assert.equal(canStartWithCalibration(true, 2, failed, false), false)
   assert.equal(canStartWithCalibration(true, 2, failed, true), true)
   assert.equal(canStartWithCalibration(false, 2, passed, true), false)
+  assert.equal(canStartWithCalibration(true, 2, passed, false, 'upper'), false)
 })

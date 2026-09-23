@@ -4,12 +4,26 @@ import type { NormalizedLandmark } from '@mediapipe/tasks-vision'
 import {
   advanceGestureFromPose,
   advanceGestureHold,
+  advancePauseHold,
   detectMenuGesture,
   inPlayerZone,
   isRightHandRaised,
   playerScreenX,
   type GestureHold,
 } from '../src/pose/gestures.ts'
+
+test('a held still cross pauses once and moving or releasing cancels it', () => {
+  let reading = advancePauseHold(null, true, 0.5, 0)
+  reading = advancePauseHold(reading.hold, true, 0.5, 1900)
+  assert.equal(reading.fired, false)
+  reading = advancePauseHold(reading.hold, true, 0.5, 2000)
+  assert.equal(reading.fired, true)
+  assert.equal(advancePauseHold(reading.hold, true, 0.5, 5000).fired, false)
+  reading = advancePauseHold(reading.hold, false, null, 5100)
+  reading = advancePauseHold(reading.hold, true, 0.5, 5200)
+  reading = advancePauseHold(reading.hold, true, 0.6, 7200)
+  assert.equal(reading.fired, false)
+})
 
 const pose = () => Array.from({ length: 33 }, () => ({ x: 0.5, y: 0.5, visibility: 1 }))
 
@@ -78,7 +92,7 @@ test('recognises deliberate menu poses without treating both arms out as navigat
   assert.equal(detectMenuGesture(p), null)
 })
 
-test('three live beeps precede one action and neutral rearms the gesture', () => {
+test('three live beeps precede navigation, then a held pose repeats at a controlled rate', () => {
   let state: GestureHold = { candidate: null, since: 0, latched: false, beeps: 0, lastBeepAt: 0 }
   let reading = advanceGestureHold(state, 'next', 100)
   assert.equal(reading.beep, 1)
@@ -97,9 +111,18 @@ test('three live beeps precede one action and neutral rearms the gesture', () =>
   assert.equal(reading.beep, null)
   assert.equal(reading.fired, 'next')
   state = reading
+  assert.equal(advanceGestureHold(state, 'next', 1600).fired, null)
+  state = advanceGestureHold(state, 'next', 1650)
+  assert.equal(state.fired, 'next')
   assert.equal(advanceGestureHold(state, 'next', 2000).fired, null)
   state = advanceGestureHold(state, null, 2100)
   assert.equal(advanceGestureHold(state, 'next', 2200).beep, 1)
+})
+
+test('select and back fire once until released', () => {
+  const ready: GestureHold = { candidate: 'confirm', since: 0, latched: true, beeps: 3, lastBeepAt: 1000 }
+  assert.equal(advanceGestureHold(ready, 'confirm', 5000).fired, null)
+  assert.equal(advanceGestureHold({ ...ready, candidate: 'back' }, 'back', 5000).fired, null)
 })
 
 test('losing recognition after the first beep cancels the remaining beeps', () => {

@@ -12,7 +12,9 @@ const LM = {
 } as const
 
 export type MenuGesture = 'previous' | 'next' | 'confirm' | 'back'
-export type GestureContext = 'library' | 'lobby' | 'results'
+export type GestureContext = 'library' | 'lobby' | 'results' | 'menu'
+export type PauseHold = { since: number; center: number } | null
+export const PAUSE_HOLD_MS = 2000
 
 export interface GestureHold {
   candidate: MenuGesture | null
@@ -29,6 +31,7 @@ export interface GestureReading extends GestureHold {
 }
 
 export const GESTURE_HOLD_MS = 900
+export const GESTURE_REPEAT_MS = 650
 const GESTURE_BEEP_GAP_MS = 400
 const GESTURE_BEEP_DURATION_MS = 100
 
@@ -121,6 +124,9 @@ export function advanceGestureHold(
     return { candidate: null, since: 0, latched: false, beeps: 0, lastBeepAt: 0, progress: 0, beep: null, fired: null }
   }
   if (state.latched) {
+    if ((gesture === 'previous' || gesture === 'next') && state.candidate === gesture && now - state.lastBeepAt >= GESTURE_REPEAT_MS) {
+      return { ...state, lastBeepAt: now, progress: 1, beep: null, fired: gesture }
+    }
     return { ...state, progress: 1, beep: null, fired: null }
   }
   if (state.candidate !== gesture) {
@@ -132,7 +138,7 @@ export function advanceGestureHold(
     return { ...state, beeps: beep, lastBeepAt: now, progress, beep, fired: null }
   }
   if (state.beeps === 3 && progress === 1 && now - state.lastBeepAt >= GESTURE_BEEP_DURATION_MS) {
-    return { ...state, latched: true, progress: 1, beep: null, fired: gesture }
+    return { ...state, latched: true, lastBeepAt: now, progress: 1, beep: null, fired: gesture }
   }
   return { ...state, progress, beep: null, fired: null }
 }
@@ -143,13 +149,30 @@ export function advanceGestureFromPose(
   pose: NormalizedLandmark[] | undefined,
   now: number,
 ): GestureReading {
-  if (state.latched && (!pose || isRightHandRaised(pose))) {
+  if (state.latched && state.candidate === 'confirm' && (!pose || isRightHandRaised(pose))) {
     return { ...state, progress: 1, beep: null, fired: null }
   }
   return advanceGestureHold(state, detectMenuGesture(pose), now)
 }
 
+/** The pause pose must stay crossed and stationary long enough to avoid dance moves. */
+export function advancePauseHold(hold: PauseHold, crossed: boolean, center: number | null, now: number) {
+  if (!crossed || center === null) return { hold: null, progress: 0, fired: false }
+  if (!hold || Math.abs(center - hold.center) > 0.06) return { hold: { since: now, center }, progress: 0, fired: false }
+  if (!Number.isFinite(hold.since)) return { hold, progress: 0, fired: false }
+  const progress = Math.min(1, (now - hold.since) / PAUSE_HOLD_MS)
+  return progress === 1
+    ? { hold: { since: Infinity, center }, progress: 0, fired: true }
+    : { hold, progress, fired: false }
+}
+
 export function gestureLabel(gesture: MenuGesture, context: GestureContext): string {
+  if (context === 'menu') {
+    if (gesture === 'previous') return 'Previous option'
+    if (gesture === 'next') return 'Next option'
+    if (gesture === 'back') return 'Go back'
+    return 'Select option'
+  }
   if (gesture === 'previous') return 'Previous song'
   if (gesture === 'next') return 'Next song'
   if (gesture === 'back') return context === 'library' ? 'Close song list' : 'Choose a song'

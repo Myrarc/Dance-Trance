@@ -1,4 +1,4 @@
-import { computeAngles, type PoseFeature } from './angles.ts'
+import { computeAngles, hitMovementDegrees, MIN_HIT_MOVEMENT_DEG, type PoseFeature } from './angles.ts'
 import type { PoseTrack } from './track'
 
 export type Difficulty = 'easy' | 'normal' | 'hard'
@@ -191,6 +191,9 @@ function buildSpots(track: PoseTrack): SpotCue[] {
       if (!before || !current || !after) continue
       const travelled = distance(lastPoint, current)
       if (travelled < MOVE_THRESHOLD[joint]) continue
+      const feature = featureAt(track, frame)
+      const movement = hitMovementDegrees(featureAt(track, lastFrame), feature, joint, false)
+      if (movement === null || movement < MIN_HIT_MOVEMENT_DEG) continue
 
       const into = { x: current.x - before.x, y: current.y - before.y }
       const out = { x: after.x - current.x, y: after.y - current.y }
@@ -208,7 +211,7 @@ function buildSpots(track: PoseTrack): SpotCue[] {
         joint,
         x: current.x,
         y: current.y,
-        feature: featureAt(track, frame),
+        feature,
         confidence: clamp01(travelled / (MOVE_THRESHOLD[joint] * 2)),
       })
       lastFrame = frame

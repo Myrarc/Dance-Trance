@@ -57,7 +57,7 @@ components:
 
 ## Direction
 
-Dance Trance feels like a friendly local arcade printed onto a late-1970s concert poster. Warm paper, flat inks, thick registration outlines, and deliberately offset shadows create the identity. Video and camera stages remain equal and dominant because the dance—not the chrome—is the product.
+Dance Trance feels like a friendly local arcade printed onto a late-1970s concert poster. Warm paper, flat inks, thick registration outlines, and deliberately offset shadows create the identity. The aubergine Insert Coin screen opens the experience; tracking then puts the camera first.
 
 ## Color
 
@@ -67,17 +67,19 @@ Use cream (`#f5e7c8`, `#fff4d8`) as paper, aubergine (`#30233f`) as universal in
 
 `Trance Display` is the custom local face and is reserved for the wordmark, stage headings, gesture commands, scores, countdowns, and result moments. Its responsive display range is 25–58px; countdowns retain the 72–180px range. Native sans remains the compact workhorse for controls and supporting copy at 11–16px. Gameplay numbers use tabular numerals.
 
+During camera registration, instructions must read from a standing distance: use native sans at 16–23px for controls, status, and tracking advice. This is an intentional exception to the compact UI scale.
+
 ## Shape and depth
 
 Use square-ish radii: 6px cards, 7px media and controls, 10px panels. Main surfaces use 3–4px aubergine borders. Physical hierarchy comes from hard offset shadows: 4px for controls/cards, 7px for desktop panels. Soft drop shadows are limited to existing overlays where legibility over live video demands them.
 
 ## Layout
 
-The desktop viewport is a vertical poster: wordmark and controls, equal reference/camera columns, then the readiness or scoring strip. At 900px and below, panels stack and decorative background shapes disappear. Gesture and pointer/keyboard navigation must remain equally usable.
+The desktop viewport is a vertical poster: wordmark and controls, then the dance stage. The attract screen is full-bleed. The initial tracking and registration screens make the live camera dominant, with the reference video as a small preview when present. Menus keep a camera preview and a large coral selected marker that reads from across the room. The song picker puts large saved-track covers in the center and a short local video preview beside them. During play the reference video is dominant and the camera is picture-in-picture. At 900px and below, panels stack and decorative background shapes disappear. Gesture and pointer/keyboard navigation must remain equally usable.
 
 ## Interaction
 
-Buttons move against their hard shadow when pressed. Existing gameplay and hit-marker motion remain unchanged. Respect `prefers-reduced-motion`. All focusable controls receive a 3px turquoise focus ring with 3px offset.
+Buttons move against their hard shadow when pressed. The selected menu item pulses between coral and marigold while held navigation repeats; reduced motion keeps the static coral marker. Existing gameplay and hit-marker motion remain unchanged. Respect `prefers-reduced-motion`. All focusable controls receive a 3px turquoise focus ring with 3px offset.
 
 ## Signature elements
 

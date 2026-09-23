@@ -20,14 +20,16 @@ Any locally loaded dance video can become a private, on-device multiplayer rhyth
 
 ## Operating Context
 
-Players load or choose a song, stand inside camera registration zones, hold a T-pose, navigate menus with deliberate held poses, follow the reference video, and read scores and timing feedback while moving several feet away from the display.
+Players dismiss an Insert Coin attract screen, register in the camera view, navigate menus with deliberate held poses, choose a song, follow the reference video, and read scores and timing feedback while moving several feet away from the display.
 
 ## Capabilities and Constraints
 
 - Reference-video pose analysis and hit-marker generation run locally.
 - Camera pose detection supports one or two players.
 - Gameplay includes readiness gating, countdown, timed scoring, combos, results, replay, and song selection.
-- Gesture commands require a hold and a return to neutral; they are disabled during active play.
+- Previous and next repeat while the arm pose stays held; select and back fire once and require a release. Menu gestures are disabled during active play.
+- The camera stays active across tracking, menus, and gameplay; a separate long crossed-arm hold pauses a round.
+- Importing a new video requires the device file picker.
 - Existing mouse, touch, and keyboard controls remain functional fallbacks.
 - UI must work on desktop and narrow mobile web layouts.
 

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
-import { T } from '../i18n'
+import { T, L } from '../i18n'
 import { accuracy, type PlayerRound } from '../pose/gameplay'
 import type { Difficulty } from '../pose/hitTargets'
 import { gradeFromAccuracy, type ArcadeRecord, type Grade } from '../game/records'
@@ -48,7 +48,7 @@ function ModeCard({ eyebrow, title, body, action, tone = '' }: {
   tone?: string
 }) {
   return (
-    <button className={`mode-card ${tone}`} onClick={action}>
+    <button className={`mode-card ${tone}`} data-gesture-label={T(title)} onClick={action}>
       <span>{T(eyebrow)}</span>
       <strong>{T(title)}</strong>
       <small>{T(body)}</small>
@@ -66,46 +66,41 @@ export function Brand({ compact = false }: { compact?: boolean }) {
   )
 }
 
-export function HomeScreen({ libraryCount, onArcade, onPractice, onLibrary, onSettings, account }: {
+export function HomeScreen({ libraryCount, trackingReady, onArcade, onPractice, onLibrary, onSettings, onTracking, account }: {
   libraryCount: number
+  trackingReady: boolean
   onArcade: () => void
   onPractice: () => void
   onLibrary: () => void
   onSettings: () => void
+  onTracking: () => void
   account: ReactNode
 }) {
   const playRef = useRef<HTMLButtonElement>(null)
   useEffect(() => playRef.current?.focus(), [])
 
   return (
-    <main className="home-screen">
+    <main className="home-screen" data-gesture-surface>
       <div className="home-topline">
         <Brand />
-        <div className="home-account">{account}</div>
+        <div className="home-account" data-gesture-skip>{account}</div>
       </div>
       <section className="home-hero">
         <div className="home-copy">
-          <span className="kicker">{T('Your video becomes the stage')}</span>
-          <h1>{T('Move loud.')}<br />{T('Score brighter.')}</h1>
-          <p>{T('Turn any dance video into a private one or two-player rhythm game. Your camera and footage stay on this device.')}</p>
-          <button ref={playRef} className="btn primary home-play" onClick={onArcade}>
+          <span className="kicker">{T(trackingReady ? 'Gesture controls ready' : 'Camera setup needed for gestures')}</span>
+          <h1>{T('Choose your game.')}</h1>
+          <p>{T(trackingReady ? 'Move through the menu with your arms, then raise your right hand to choose.' : 'Use the buttons or open Camera setup to enable gesture controls.')}</p>
+          <button ref={playRef} className="btn primary home-play" data-gesture-default onClick={onArcade}>
             <span>{T('Play Arcade')}</span><b aria-hidden="true">▶</b>
           </button>
-        </div>
-        <div className="home-poster" aria-hidden="true">
-          <span className="poster-ring ring-one" />
-          <span className="poster-ring ring-two" />
-          <strong>1—2</strong>
-          <small>PLAYERS</small>
-          <i>LOCAL<br />POSE<br />POWER</i>
         </div>
       </section>
       <nav className="mode-grid" aria-label={T('Game modes')}>
         <ModeCard eyebrow="Learn the routine" title="Practice Studio" body="Loop, slow down, and focus on the parts that need work." action={onPractice} tone="cyan" />
         <ModeCard eyebrow={`${libraryCount} saved tracks`} title="Library" body="Pick up a prepared song or bring in a new dance video." action={onLibrary} tone="yellow" />
         <ModeCard eyebrow="Make it yours" title="Settings" body="Adjust tracking overlays, sound, language, and motion." action={onSettings} tone="cream" />
+        <ModeCard eyebrow="Get back in frame" title="Camera setup" body="Reconnect tracking and register players again." action={onTracking} tone="cyan" />
       </nav>
-      <p className="offline-note">{T('First-time tracking setup needs internet. Prepared songs work offline after their models are cached.')}</p>
     </main>
   )
 }
@@ -122,7 +117,7 @@ export function WelcomeOverlay({ onStart, onExplore }: {
       <div className="welcome-card">
         <span className="welcome-step">{T('Ready when you are')}</span>
         <h2 id="welcome-title">{T('Your video.')}<br />{T('Your moves.')}<br />{T('Your arcade.')}</h2>
-        <p>{T('Turn any dance video into a local one or two-player rhythm game. Camera and video processing stay on this device.')}</p>
+        <p>{L('Turn a dance video into a one or two-player rhythm game.', '把舞蹈视频变成单人或双人节奏游戏。')}</p>
         <div className="welcome-actions">
           <button className="btn primary" onClick={onStart}>{T('Let’s dance')}</button>
           <button className="btn subtle" onClick={onExplore}>{T('Explore first')}</button>
@@ -158,7 +153,7 @@ export function SettingsScreen({ settings, onChange, onClose }: {
     onChange({ ...settings, [key]: value })
 
   return (
-    <main ref={modalRef} className="destination-screen settings-screen" role="dialog" aria-modal="true" aria-labelledby="settings-title" onKeyDown={(event) => { if (event.key === 'Escape') onClose() }}>
+    <main ref={modalRef} className="destination-screen settings-screen" role="dialog" aria-modal="true" aria-labelledby="settings-title" data-gesture-surface onKeyDown={(event) => { if (event.key === 'Escape') onClose() }}>
       <div className="screen-title-row">
         <div><span className="kicker">{T('Player preferences')}</span><h1 id="settings-title">{T('Settings')}</h1></div>
         <button className="btn" onClick={onClose}>{T('Back')}</button>
@@ -193,7 +188,7 @@ export function PauseOverlay({ onResume, onRestart, onSettings, onQuit }: {
   const modalRef = useRef<HTMLElement>(null)
   useModalFocus(modalRef)
   return (
-    <section ref={modalRef} className="pause-overlay" role="dialog" aria-modal="true" aria-labelledby="pause-title">
+    <section ref={modalRef} className="pause-overlay" role="dialog" aria-modal="true" aria-labelledby="pause-title" data-gesture-surface>
       <div className="pause-card">
         <span className="kicker">{T('Take a breath')}</span>
         <h2 id="pause-title">{T('Paused')}</h2>

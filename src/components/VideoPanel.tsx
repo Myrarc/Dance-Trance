@@ -1,4 +1,4 @@
-import { T } from '../i18n'
+import { T, L } from '../i18n'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { HandLandmarker, NormalizedLandmark, PoseLandmarker } from '@mediapipe/tasks-vision'
 import { createHandLandmarker, createPoseLandmarker } from '../pose/landmarker'
@@ -21,7 +21,7 @@ import {
 import { computeAngles, dimmedSegments, type Focus, type Landmark3, type PoseFeature, type TargetFrame } from '../pose/angles'
 import { facing, type Facing } from '../pose/skeleton'
 import { LandmarkSmoother } from '../pose/filter'
-import { sampleTrack, type AnalysisMetrics, type PoseTrack } from '../pose/track'
+import { sampleTrack, type PoseTrack } from '../pose/track'
 import {
   buildCueChart,
   upcomingCues,
@@ -70,7 +70,6 @@ interface Props {
   track?: PoseTrack | null
   onAnalyse?: () => void
   analysing?: number | null
-  analysisMetrics?: AnalysisMetrics | null
   analysisMessage?: string | null
   showSkeletons: boolean
   trackHead?: boolean
@@ -157,7 +156,6 @@ export default function VideoPanel({
   track,
   onAnalyse,
   analysing,
-  analysisMetrics,
   analysisMessage,
   showSkeletons,
   trackHead = true,
@@ -847,16 +845,14 @@ export default function VideoPanel({
       <div className="panel-head">
         <h2>{T('Reference')}</h2>
         <span className="hint">
-          {modelState === 'loading' && T('Loading pose model…')}
-          {modelState === 'error' && T('Model failed to load — try reloading')}
-          {analysing != null && `${T('Analysing movement')} ${Math.round(analysing * 100)}%${analysisMessage ? ` · ${analysisMessage}` : ''}`}
+          {modelState === 'loading' && L('Getting the stage ready…', '正在准备舞台…')}
+          {modelState === 'error' && L('Could not get ready. Reload and try again.', '无法准备，请重新载入后重试。')}
+          {analysing != null && `${L('Finding dance moves', '正在寻找舞蹈动作')} ${Math.round(analysing * 100)}%${analysisMessage ? ` · ${analysisMessage}` : ''}`}
           {analysing == null && analysisMessage && analysisMessage}
           {modelState === 'ready' && analysing == null && !analysisMessage && track &&
             (cueChart.length === 0
-              ? T('No hit markers found in the analysed poses')
-              : analysisMetrics
-                ? `${cueChart.length} ${T('hit markers ready')} · ${track.bpm ? `${Math.round(track.bpm)} BPM · ` : ''}${analysisMetrics.method} · ${(analysisMetrics.totalMs / 1000).toFixed(1)}s`
-                : `${cueChart.length} ${T('hit markers ready')} · ${track.bpm ? `${Math.round(track.bpm)} BPM · ` : ''}${T('800 ms preview')}`)}
+              ? L('No dance moves found. Try a different video.', '未找到舞蹈动作，请试试其他视频。')
+              : L(`${cueChart.length} moves ready`, `${cueChart.length} 个动作已准备好`))}
           {modelState === 'ready' && analysing == null && !analysisMessage && !track && locked && T('Following one dancer · click another to switch')}
           {modelState === 'ready' && analysing == null && !analysisMessage && !track && !locked && personCount > 1 && T('Multiple dancers · click the one to follow')}
           {modelState === 'ready' && analysing == null && !analysisMessage && !track && !locked && personCount <= 1 && T('Click a dancer to lock on')}
@@ -956,7 +952,7 @@ export default function VideoPanel({
                 resetFraming()
                 setLocked(false)
               }}
-              title={T('Go back to following whoever dominates the frame')}
+              title={T('Follow the main dancer again')}
             >
               {T('Unlock')}
             </button>
@@ -966,7 +962,7 @@ export default function VideoPanel({
               className={`btn subtle ${track ? 'active' : ''}`}
               onClick={onAnalyse}
               disabled={analysing != null}
-              title={T('Work out the reference skeleton once, so playback costs nothing')}
+              title={T('Get this dance ready to play')}
             >
               {analysing != null
                 ? `${T('Analysing')} ${Math.round(analysing * 100)}%`
@@ -997,7 +993,7 @@ export default function VideoPanel({
             className={`btn ${handsOn ? 'active' : ''}`}
             onClick={() => void toggleHands()}
             disabled={handsLoading}
-            title={T('Track finger positions — costs an extra model pass per frame')}
+            title={T('Show finger movements. This may slow playback.')}
           >
             {T(handsLoading ? 'Loading…' : 'Fingers')}
           </button>
