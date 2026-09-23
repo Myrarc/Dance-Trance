@@ -24,7 +24,6 @@ import { accuracy, type GamePhase, type HitGrade, type PlayerRound } from './pos
 import type { CueEvent, Difficulty } from './pose/hitTargets'
 import type { GestureContext, MenuGesture } from './pose/gestures'
 import { gameReducer, initialGameState, type AppScreen } from './game/state'
-import { canStartWithCalibration, type CalibrationState } from './pose/calibration'
 import { mergeCloudRecords, recordCompletedRound, recordsForCloud, type ArcadeRecord } from './game/records'
 
 const VideoPanel = lazy(() => import('./components/VideoPanel'))
@@ -56,12 +55,11 @@ export default function App() {
   const [countdown, setCountdown] = useState(3)
   const [gameRun, setGameRun] = useState(0)
   const [lobby, setLobby] = useState({ ready: false, players: 0 })
-  const [calibration, setCalibration] = useState<CalibrationState | null>(null)
-  const [calibrationBypassed, setCalibrationBypassed] = useState(false)
   const [gamePlayers, setGamePlayers] = useState<PlayerRound[]>([])
   const [scoreDebug, setScoreDebug] = useState<ScoreDebug[]>([])
   const [hitFeedback, setHitFeedback] = useState<{ id: number; grade: Exclude<HitGrade, 'miss'>; target: CueEvent } | null>(null)
   const [gestureSelectedId, setGestureSelectedId] = useState<string | null>(null)
+  const [carouselMotion, setCarouselMotion] = useState<{ direction: 'left' | 'right'; turn: number } | null>(null)
   const [previewSrc, setPreviewSrc] = useState<{ id: string; url: string } | null>(null)
   const [previewPaused, setPreviewPaused] = useState(false)
   const [menuLabel, setMenuLabel] = useState('')
@@ -77,7 +75,7 @@ export default function App() {
   const wasLobbyReadyRef = useRef(false)
 
   const arcadePhase = navigation.arcadePhase
-  const gamePhase: GamePhase = arcadePhase === 'setup' || arcadePhase === 'registration' ? 'lobby' : arcadePhase
+  const gamePhase: GamePhase = arcadePhase === 'setup' ? 'lobby' : arcadePhase
 
   const go = (type: 'openHome' | 'openArcade' | 'openPractice' | 'openLibrary' | 'openSettings') => {
     playSfx('menu', settings.soundMuted)
@@ -141,8 +139,6 @@ export default function App() {
 
   useEffect(() => {
     setLobby({ ready: false, players: 0 })
-    setCalibration(null)
-    setCalibrationBypassed(false)
     setGamePlayers([])
     setResultRecords([])
     comboMilestonesRef.current = []
@@ -223,6 +219,18 @@ export default function App() {
   }, [arcadePhase, gameRun, settings.soundMuted])
 
   useEffect(() => {
+    if (activeScreen !== 'arcade' || arcadePhase !== 'setup' || !src || !track || !cameraRunning || !lobby.ready || lobby.players < registrationPlayers) return
+    const timer = window.setTimeout(() => {
+      setGamePlayers([])
+      setResultRecords([])
+      comboMilestonesRef.current = []
+      setGameRun((run) => run + 1)
+      dispatch({ type: 'startCountdown' })
+    }, 1400)
+    return () => clearTimeout(timer)
+  }, [activeScreen, arcadePhase, src, track, cameraRunning, lobby.ready, lobby.players, registrationPlayers])
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || activeScreen !== 'arcade' || navigation.screen === 'settings') return
       if (arcadePhase === 'playing') dispatch({ type: 'pause' })
@@ -233,7 +241,7 @@ export default function App() {
   }, [activeScreen, arcadePhase, navigation.screen])
 
   const startRound = () => {
-    if (!track || !canStartWithCalibration(lobby.ready, lobby.players, calibration, calibrationBypassed, focus)) return
+    if (!track || !cameraRunning || !lobby.ready || lobby.players < registrationPlayers) return
     setGamePlayers([])
     setResultRecords([])
     comboMilestonesRef.current = []
@@ -267,10 +275,6 @@ export default function App() {
 
   const updateLobby = useCallback((ready: boolean, players: number) => {
     setLobby((value) => value.ready === ready && value.players === players ? value : { ready, players })
-  }, [])
-  const updateCalibration = useCallback((next: CalibrationState | null) => {
-    setCalibration(next)
-    setCalibrationBypassed(false)
   }, [])
   const updateGameScores = useCallback((players: PlayerRound[]) => {
     players.forEach((player, index) => {
@@ -399,8 +403,15 @@ export default function App() {
   }
 
   const pickingSong = !src && navigation.screen !== 'settings' && (activeScreen === 'arcade' || activeScreen === 'practice')
+  useEffect(() => { if (!pickingSong) setCarouselMotion(null) }, [pickingSong])
+  const moveSong = (direction: 'left' | 'right') => {
+    if (!previewEntry || library.length < 2) return
+    const index = library.findIndex((entry) => entry.id === previewEntry.id)
+    setCarouselMotion((motion) => ({ direction, turn: (motion?.turn ?? 0) + 1 }))
+    setGestureSelectedId(library[(index + (direction === 'left' ? -1 : 1) + library.length) % library.length].id)
+  }
   const gestureContext: GestureContext | null = lobby.ready && navigation.screen !== 'tracking' &&
-    navigation.screen !== 'attract' && !(activeScreen === 'arcade' && (arcadePhase === 'playing' || arcadePhase === 'countdown')) ? pickingSong ? 'songPicker' : 'menu' : null
+    navigation.screen !== 'attract' && !(activeScreen === 'arcade' && src && arcadePhase !== 'results') ? pickingSong ? 'songPicker' : 'menu' : null
   const hasTrack = !!track
 
   const menuItems = () => {
@@ -416,7 +427,7 @@ export default function App() {
     item.setAttribute('data-gesture-selected', 'true')
     item.setAttribute('data-selection-label', L('SELECTED', '已选择'))
     item.focus({ preventScroll: true })
-    item.scrollIntoView({ block: 'nearest', inline: item.closest('.track-picker') ? 'center' : 'nearest' })
+    if (!item.closest('.song-carousel')) item.scrollIntoView({ block: 'nearest', inline: 'nearest' })
     setMenuLabel(item.getAttribute('data-gesture-label') ?? item.getAttribute('aria-label') ?? item.innerText?.trim().replace(/\s+/g, ' ').slice(0, 55) ?? '')
   }
 
@@ -441,17 +452,14 @@ export default function App() {
     if (gesture === 'back') {
       if (navigation.screen === 'settings') dispatch({ type: 'closeSettings' })
       else if (activeScreen === 'arcade' && arcadePhase === 'paused') dispatch({ type: 'resume' })
-      else if (activeScreen === 'arcade' && (arcadePhase === 'results' || arcadePhase === 'registration')) chooseSong()
+      else if (activeScreen === 'arcade' && arcadePhase === 'results') chooseSong()
       else if (navigation.screen === 'home') dispatch({ type: 'quitHome' })
       else dispatch({ type: 'openHome' })
       return
     }
     if (pickingSong && previewEntry) {
       if (gesture === 'confirm') void openEntry(previewEntry, activeScreen)
-      else {
-        const index = library.findIndex((entry) => entry.id === previewEntry.id)
-        setGestureSelectedId(library[(index + (gesture === 'previous' ? -1 : 1) + library.length) % library.length].id)
-      }
+      else moveSong(gesture === 'previous' ? 'left' : 'right')
       return
     }
     const items = menuItems()
@@ -480,18 +488,17 @@ export default function App() {
       onDrop={(event) => { event.preventDefault(); setDragOver(false); void loadFile(event.dataTransfer.files?.[0], destination) }}>
       <div className="picker-heading"><h1>{L(destination === 'arcade' ? 'Select your track' : 'Select a routine', destination === 'arcade' ? '选择歌曲' : '选择练习')}</h1><p>{L('Left arm out: previous song · Right arm out: next song · Right hand up: play · Left hand up: back', '左臂平伸：上一首 · 右臂平伸：下一首 · 举右手：开始 · 举左手：返回')}</p></div>
       <div className="picker-stage">
-        {library.length ? <div className="song-carousel" role="group" aria-label={L('Song picker', '歌曲选择')}>
+        {library.length ? <div key={carouselMotion?.turn ?? 0} className={`song-carousel${carouselMotion ? ` is-moving-${carouselMotion.direction}` : ''}`} data-count={library.length} role="group" aria-label={L('Song picker', '歌曲选择')}>
           {([library.length > 1 ? library[(library.findIndex((entry) => entry.id === previewEntry.id) - 1 + library.length) % library.length] : null, previewEntry, library.length > 2 ? library[(library.findIndex((entry) => entry.id === previewEntry.id) + 1) % library.length] : null] as const).map((entry, slot) => entry ? <button
             key={entry.id}
             className={`song-card song-card-${slot === 0 ? 'left' : slot === 1 ? 'center' : 'right'}`}
             data-track-id={entry.id}
             data-gesture-label={entry.name.replace(/\.[^.]+$/, '')}
             aria-current={slot === 1 ? 'true' : undefined}
-            onFocus={() => { if (slot !== 1) setGestureSelectedId(entry.id) }}
-            onClick={() => { if (slot === 1) void openEntry(entry, destination); else setGestureSelectedId(entry.id) }}
+            onClick={() => { if (slot === 1) void openEntry(entry, destination); else moveSong(slot === 0 ? 'left' : 'right') }}
           >
             <span className="song-card-media">
-              {slot === 1 && previewSrc?.id === entry.id ? <video ref={previewRef} src={previewSrc.url} playsInline preload="auto" onLoadedMetadata={(event) => {
+              {slot === 1 && previewSrc?.id === entry.id ? <video ref={previewRef} src={previewSrc.url} poster={entry.thumb} playsInline preload="auto" onLoadedMetadata={(event) => {
               const video = event.currentTarget
               previewStartRef.current = Math.min(12, Math.max(0, video.duration - 8))
               video.currentTime = previewStartRef.current
@@ -514,7 +521,7 @@ export default function App() {
     const panelPhase: GamePhase = mode === 'practice' ? 'lobby' : gamePhase
     return (
       <Suspense fallback={<LoadingStage />}>
-        <main className={`panels ${mode === 'arcade' && arcadePhase === 'registration' ? 'calibration-active' : mode === 'arcade' && ['countdown', 'playing', 'paused'].includes(gamePhase) ? 'game-active' : mode === 'arcade' && gamePhase === 'results' ? 'game-results-stage' : ''}`}>
+        <main className={`panels ${mode === 'arcade' && ['countdown', 'playing', 'paused'].includes(gamePhase) ? 'game-active' : mode === 'arcade' && gamePhase === 'results' ? 'game-results-stage' : ''}`}>
           <VideoPanel src={src} targetRef={targetRef} sections={current?.sections ?? []} sectionStats={current?.sectionStats} onSectionsChange={(sections) => void updateSections(sections)} focus={focus} track={track} onAnalyse={() => void analyse()} analysing={analysing} analysisMessage={analysisMessage} showSkeletons={settings.showSkeletons} trackHead={settings.trackHead} difficulty={difficulty} gamePhase={panelPhase} countdown={countdown} gameRun={gameRun} onGameEnd={() => void finishRound()} hitFeedback={hitFeedback} />
         </main>
       </Suspense>
@@ -524,27 +531,19 @@ export default function App() {
   const renderArcade = () => {
     if (arcadePhase === 'setup') {
       return <div className="destination-wrap">{renderHeader('Arcade')}{!src ? renderTrackPicker('arcade') : (
-        <main className="arcade-setup-screen" data-gesture-surface><section className="setup-poster"><span className="kicker">{T('Step 1 · Song ready')}</span><h1>{current?.name ?? T('Your dance')}</h1><p>{analysing == null ? track ? L('Your dance is ready. Set up the players to begin.', '舞蹈已准备好，设置玩家即可开始。') : L('Getting your dance ready…', '正在准备舞蹈…') : `${L('Getting ready', '正在准备')} ${Math.round(analysing * 100)}%`}</p>{analysisMessage && <p className="error">{analysisMessage}</p>}<div className="setup-actions"><button className="btn primary" disabled={!track} onClick={() => { setCalibration(null); setCalibrationBypassed(false); dispatch({ type: 'beginRegistration' }) }}>{T('Set up players')}</button><button className="btn" onClick={chooseSong}>{T('Change song')}</button></div></section><section className="setup-privacy"><strong>{L('Up next', '接下来')}</strong><span>{L('Stand in front of the camera and follow the player check.', '站到摄像头前，按照提示完成玩家检查。')}</span></section></main>
+        <main className="song-loading-screen" role="status" aria-live="polite"><div className="song-loading-card">
+          <div className="song-loading-art">{current?.thumb ? <img src={current.thumb} alt="" /> : <span>♪</span>}</div>
+          <div className="song-loading-copy"><span className="kicker">{L('Up next', '即将开始')}</span><h1>{current?.name.replace(/\.[^.]+$/, '') ?? T('Your dance')}</h1>
+            <p>{analysisMessage ?? (analysing != null ? L(`Getting your song ready · ${Math.round(analysing * 100)}%`, `正在准备歌曲 · ${Math.round(analysing * 100)}%`) : !track ? L('Getting your song ready…', '正在准备歌曲…') : !cameraRunning ? L('Turn on your camera to play.', '打开摄像头开始游戏。') : !lobby.ready || lobby.players < registrationPlayers ? L('Step back into view to start.', '回到画面中即可开始。') : L('Get ready to dance!', '准备好跳舞！'))}</p>
+            <div className="song-loading-progress"><i style={{ width: `${Math.round((analysing ?? (track ? 1 : 0.08)) * 100)}%` }} /></div>
+            <button className="btn" onClick={chooseSong}>{T('Change song')}</button>
+          </div>
+        </div></main>
       )}</div>
     }
     return (
       <div className={`destination-wrap ${['countdown', 'playing', 'paused'].includes(arcadePhase) ? 'game-screen-active' : ''}`}>
         {renderHeader('Arcade')}
-        {arcadePhase === 'registration' && <section className="game-flow game-lobby" aria-live="polite" data-gesture-surface>
-          <div className="registration-status">
-            <strong>{lobby.ready ? L(`${lobby.players}/${registrationPlayers} players tracked`, `已追踪 ${lobby.players}/${registrationPlayers} 位玩家`) : T('Player check')}</strong>
-            <span>{!lobby.ready ? T('Enter the camera zones and hold your right hand up.') : calibration && calibration.playerCount !== lobby.players ? T('A registered player is out of view. Return to your area and hold your right hand up.') : calibration?.phase === 'passed' ? T('Tracking checked. Choose a difficulty, then start.') : calibration?.phase === 'failed' ? T('Tracking needs attention. Try again or play anyway.') : T('Follow the camera check before starting.')}</span>
-          </div>
-          <div className="difficulty-picker player-count-picker" role="group" aria-label={T('Players')}>{([1, 2] as const).map((count) => <button key={count} className={`difficulty-option${registrationPlayers === count ? ' active' : ''}`} aria-pressed={registrationPlayers === count} onClick={() => setRegistrationPlayers(count)}>{L(`${count} player${count === 1 ? '' : 's'}`, `${count} 位玩家`)}</button>)}</div>
-          <div className="difficulty-picker tracking-focus-picker" role="group" aria-label={L('Tracking focus', '追踪重点')}>{([
-            ['full', T('Whole body')],
-            ['upper', T('Arms only')],
-            ['lower', T('Legs only')],
-          ] as const).map(([mode, label]) => <button key={mode} className={`difficulty-option${focus === mode ? ' active' : ''}`} aria-pressed={focus === mode} onClick={() => setFocus(mode)}>{label}</button>)}</div>
-          <div className="difficulty-picker" role="group" aria-label={T('Difficulty')}>{DIFFICULTIES.map((level) => <button key={level} className={`difficulty-option${difficulty === level ? ' active' : ''}`} aria-pressed={difficulty === level} onClick={() => setDifficulty(level)}>{T(level)}</button>)}</div>
-          {calibration?.phase === 'failed' && !calibrationBypassed && <button className="btn" onClick={() => setCalibrationBypassed(true)}>{T('Play anyway')}</button>}
-          <button className="btn primary" onClick={startRound} disabled={!track || !canStartWithCalibration(lobby.ready, lobby.players, calibration, calibrationBypassed, focus)}>{T('Start game')}</button>
-        </section>}
         {arcadePhase === 'playing' && <section className="game-flow game-playing" aria-live="polite"><div className="game-score-strip">{(gamePlayers.length ? gamePlayers : Array.from({ length: Math.max(1, lobby.players) }, () => null)).map((player, index) => <span key={index}><b>P{index + 1}</b> {player?.score.toLocaleString() ?? '0'}<small>{player?.combo ? `${player.combo}× ${T('combo')}` : T('build your combo')}</small>{import.meta.env.DEV && scoreDebug[index] && <small className="score-debug">{scoreDebug[index].cue} · {scoreDebug[index].grade} · {Math.round(scoreDebug[index].lag * 1000)}ms</small>}</span>)}</div><button className="pause-button" onClick={() => dispatch({ type: 'pause' })} aria-label={T('Pause')}>Ⅱ</button></section>}
         {arcadePhase === 'results' && <section className="game-flow game-results" aria-live="polite" data-gesture-surface><ResultsScreen players={gamePlayers} difficulty={difficulty} records={resultRecords} reducedEffects={settings.reducedEffects} onReplay={startRound} onChooseSong={chooseSong} onHome={() => dispatch({ type: 'openHome' })} /></section>}
         {renderPanels('arcade')}
@@ -577,14 +576,16 @@ export default function App() {
         <span className="kicker">{L('Step into the game', '进入游戏')}</span>
         <h1>{L('Get in the picture.', '进入画面。')}</h1>
         <p>{L('Turn on the camera, stand in the marked area, then hold your right hand up with your left hand down. Release your hand to control the menu.', '打开摄像头，站进标记区域，右手举起、左手放下。放下右手后即可用手势控制菜单。')}</p>
-        <div className="tracking-player-choice" role="group" aria-label={T('Players')}>{([1, 2] as const).map((count) => <button key={count} className={`btn${registrationPlayers === count ? ' active' : ''}`} onClick={() => setRegistrationPlayers(count)}>{L(`${count} player${count === 1 ? '' : 's'}`, `${count} 位玩家`)}</button>)}<button className="btn subtle" onClick={() => dispatch({ type: 'openHome' })}>{L('Continue to menu', '继续进入菜单')}</button></div>
+        <div className="tracking-player-choice" role="group" aria-label={T('Players')}>{([1, 2] as const).map((count) => <button key={count} className={`btn${registrationPlayers === count ? ' active' : ''}`} onClick={() => setRegistrationPlayers(count)}>{L(`${count} player${count === 1 ? '' : 's'}`, `${count} 位玩家`)}</button>)}</div>
+        <div className="tracking-options"><div role="group" aria-label={L('Tracking focus', '追踪重点')}>{([['full', T('Whole body')], ['upper', T('Arms only')], ['lower', T('Legs only')]] as const).map(([mode, label]) => <button key={mode} className={`btn${focus === mode ? ' active' : ''}`} aria-pressed={focus === mode} onClick={() => setFocus(mode)}>{label}</button>)}</div><div role="group" aria-label={T('Difficulty')}>{DIFFICULTIES.map((level) => <button key={level} className={`btn${difficulty === level ? ' active' : ''}`} aria-pressed={difficulty === level} onClick={() => setDifficulty(level)}>{T(level)}</button>)}</div></div>
+        <button className="btn subtle" onClick={() => dispatch({ type: 'openHome' })}>{L('Continue to menu', '继续进入菜单')}</button>
       </main>}
       {activeScreen === 'home' && <HomeScreen libraryCount={library.length} trackingReady={lobby.ready} onArcade={() => go('openArcade')} onPractice={() => go('openPractice')} onLibrary={() => go('openLibrary')} onSettings={() => go('openSettings')} onTracking={() => dispatch({ type: 'wake' })} account={<AccountBar />} />}
       {activeScreen === 'arcade' && renderArcade()}
       {activeScreen === 'practice' && renderPractice()}
       {activeScreen === 'library' && renderLibrary()}
       {navigation.screen !== 'attract' && <Suspense fallback={null}><div className={`camera-dock camera-${navigation.screen === 'tracking' ? 'tracking' : activeScreen === 'arcade' ? arcadePhase : activeScreen}${cameraRunning ? '' : ' camera-off'}`}>
-        <WebcamPanel targetRef={targetRef} videoId={current?.id} videoName={current?.name} onSectionPractice={(deltas) => void recordSectionPractice(deltas)} focus={focus} onFocusChange={setFocus} showSkeletons={settings.showSkeletons} trackHead={settings.trackHead} gamePhase={activeScreen === 'arcade' ? gamePhase : 'lobby'} gameRun={gameRun} onLobbyChange={updateLobby} onGameScores={updateGameScores} onHit={showHit} onScoreDebug={import.meta.env.DEV ? updateScoreDebug : undefined} requireCalibration={activeScreen === 'arcade' && arcadePhase === 'registration'} registrationPlayers={registrationPlayers} onRegistrationPlayersChange={activeScreen === 'practice' ? setRegistrationPlayers : undefined} onCalibrationChange={updateCalibration} gestureContext={gestureContext} onGestureAction={handleGestureAction} onRunningChange={setCameraRunning} />
+        <WebcamPanel targetRef={targetRef} videoId={current?.id} videoName={current?.name} onSectionPractice={(deltas) => void recordSectionPractice(deltas)} focus={focus} onFocusChange={setFocus} showSkeletons={settings.showSkeletons} trackHead={settings.trackHead} gamePhase={activeScreen === 'arcade' ? gamePhase : 'lobby'} gameRun={gameRun} onLobbyChange={updateLobby} onGameScores={updateGameScores} onHit={showHit} onScoreDebug={import.meta.env.DEV ? updateScoreDebug : undefined} registrationPlayers={registrationPlayers} onRegistrationPlayersChange={activeScreen === 'practice' ? setRegistrationPlayers : undefined} gestureContext={gestureContext} onGestureAction={handleGestureAction} onRunningChange={setCameraRunning} />
       </div></Suspense>}
       {navigation.screen === 'settings' && <SettingsScreen settings={settings} onChange={updateSettings} onClose={() => dispatch({ type: 'closeSettings' })} />}
       {gestureContext && <div className="menu-gesture-hud" aria-live="polite"><b>{L('MOVE TO CHOOSE', '移动手臂选择')}</b><span>{filePickerNotice ? L('Use the device to choose a video file.', '请用设备选择视频文件。') : menuLabel || L('Choose an option', '选择选项')}</span><small>{pickingSong ? L('Left arm out: previous · Right arm out: next · Right hand up: play · Left hand up: back', '左臂平伸：上一首 · 右臂平伸：下一首 · 举右手：开始 · 举左手：返回') : L('Left arm out: previous · Right arm out: next · Right hand up: select · Left hand up: back', '左臂平伸：上一个 · 右臂平伸：下一个 · 举右手：选择 · 举左手：返回')}</small></div>}

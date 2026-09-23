@@ -572,7 +572,7 @@ header .sub {
   padding: 18px;
   overflow: hidden;
   border: 2px dashed rgba(244, 244, 247, 0.5);
-  border-radius: 16px;
+  border-radius: 10px;
   color: var(--text);
   background: rgba(11, 11, 15, 0.12);
   text-shadow: 0 1px 8px #000;
@@ -2728,7 +2728,7 @@ input[type='range'] { accent-color: var(--accent); }
   bottom: 100px;
   width: min(300px, 28vw);
 }
-.camera-dock.camera-off:not(.camera-tracking):not(.camera-registration) { display: none; }
+.camera-dock.camera-off:not(.camera-tracking):not(.camera-setup) { display: none; }
 .camera-dock > .panel { position: relative; min-height: 0; padding: 6px; }
 .camera-dock .panel-head, .camera-dock .controls { display: none; }
 .camera-dock .webcam-stage { flex: none; width: 100%; min-height: 0; aspect-ratio: 16 / 9; }
@@ -2741,7 +2741,7 @@ input[type='range'] { accent-color: var(--accent); }
 .camera-dock .gesture-command span { display: none; }
 
 .camera-tracking {
-  top: clamp(190px, 26vh, 260px);
+  top: clamp(370px, 44vh, 460px);
   right: 5vw;
   bottom: 5vh;
   left: 5vw;
@@ -2783,7 +2783,7 @@ input[type='range'] { accent-color: var(--accent); }
 .panels.calibration-active { flex: 0 0 auto; }
 .panels.calibration-active > .panel:first-child { width: 350px; justify-self: end; }
 
-.camera-countdown, .camera-playing { top: 16px; right: 16px; bottom: auto; width: clamp(170px, 18vw, 250px); }
+.camera-countdown, .camera-playing { top: 16px; right: auto; bottom: auto; left: 16px; width: clamp(170px, 18vw, 250px); }
 .camera-setup { top: auto; right: 16px; bottom: 16px; left: auto; width: clamp(150px, 16vw, 220px); }
 .camera-countdown .webcam-stage, .camera-playing .webcam-stage { aspect-ratio: 16 / 9; }
 .camera-results { z-index: 90; top: 50%; right: 3vw; bottom: auto; width: 46vw; transform: translateY(-50%); }
@@ -2836,7 +2836,7 @@ input[type='range'] { accent-color: var(--accent); }
   .attract-demo { min-height: 280px; }
   .demo-one { left: 10%; } .demo-two { right: 10%; }
   .tracking-screen { padding: 18px; }
-  .camera-tracking { top: 260px; right: 12px; bottom: 10px; left: 12px; }
+  .camera-tracking { top: 400px; right: 12px; bottom: 10px; left: 12px; }
   .camera-registration { top: 340px; right: 12px; bottom: 12px; left: 12px; }
   .camera-registration .webcam-stage { min-height: 45vh; }
   .camera-registration .calibration-card { position: static; width: 100%; max-height: none; }
@@ -2874,7 +2874,7 @@ input[type='range'] { accent-color: var(--accent); }
 .picker-heading h1 { margin: 0; font-family: inherit; font-size: clamp(40px, 5vw, 82px); font-weight: 950; line-height: 1; }
 .picker-heading p { margin: 8px 0 0; font-size: clamp(18px, 1.5vw, 26px); font-weight: 800; }
 .picker-stage { position: relative; width: 100%; min-width: 0; }
-.song-carousel { position: relative; width: 100%; height: clamp(410px, 31vw, 450px); overflow: hidden; }
+.song-carousel { --carousel-step: clamp(280px, 31vw, 440px); position: relative; width: 100%; height: clamp(410px, 31vw, 450px); overflow: hidden; }
 .song-card {
   --shift: 0px;
   position: absolute;
@@ -2894,11 +2894,62 @@ input[type='range'] { accent-color: var(--accent); }
   box-shadow: 8px 8px 0 var(--ink);
   transform: translateX(calc(-50% + var(--shift))) scale(.86);
   transition: transform .34s cubic-bezier(.2,.8,.2,1), background-color .34s;
+  backface-visibility: hidden;
 }
-.song-card-left { --shift: clamp(-440px, -31vw, -280px); }
-.song-card-right { --shift: clamp(280px, 31vw, 440px); }
+.song-card-left { --shift: calc(0px - var(--carousel-step)); }
+.song-card-right { --shift: var(--carousel-step); }
 .song-card-center { z-index: 2; outline: 5px solid var(--accent); outline-offset: 5px; background: var(--warn); transform: translateX(-50%) scale(1); }
-.song-card[data-gesture-selected] { animation: gesture-selection 1.1s steps(2,end) infinite; }
+.song-card[data-gesture-selected] { position: absolute; animation: gesture-selection 1.1s steps(2,end) infinite; }
+.song-card-center[data-gesture-selected] { z-index: 2; }
+.song-carousel.is-moving-left .song-card-center { animation: song-center-from-left .48s cubic-bezier(.2,.8,.2,1) both; }
+.song-carousel.is-moving-left .song-card-right { animation: song-right-from-center .48s cubic-bezier(.2,.8,.2,1) both; }
+.song-carousel.is-moving-left .song-card-left { animation: song-wrap-right-to-left .48s ease-in-out both; }
+.song-carousel.is-moving-right .song-card-center { animation: song-center-from-right .48s cubic-bezier(.2,.8,.2,1) both; }
+.song-carousel.is-moving-right .song-card-left { animation: song-left-from-center .48s cubic-bezier(.2,.8,.2,1) both; }
+.song-carousel.is-moving-right .song-card-right { animation: song-wrap-left-to-right .48s ease-in-out both; }
+.song-carousel[data-count="2"].is-moving-right .song-card-center { animation-name: song-center-from-left; }
+.song-carousel[data-count="2"].is-moving-left .song-card-left,
+.song-carousel[data-count="2"].is-moving-right .song-card-left { animation-name: song-left-from-center; }
+.song-carousel:not([data-count="3"]):not([data-count="2"]).is-moving-left .song-card-left { animation-name: song-enter-left; }
+.song-carousel:not([data-count="3"]):not([data-count="2"]).is-moving-right .song-card-right { animation-name: song-enter-right; }
+@keyframes song-center-from-left {
+  0% { transform: translateX(calc(-50% - var(--carousel-step))) rotate(-3deg) scale(.86); }
+  72% { transform: translateX(calc(-50% + 18px)) rotate(1deg) scale(1.035); }
+  100% { transform: translateX(-50%) rotate(0) scale(1); }
+}
+@keyframes song-center-from-right {
+  0% { transform: translateX(calc(-50% + var(--carousel-step))) rotate(3deg) scale(.86); }
+  72% { transform: translateX(calc(-50% - 18px)) rotate(-1deg) scale(1.035); }
+  100% { transform: translateX(-50%) rotate(0) scale(1); }
+}
+@keyframes song-right-from-center {
+  0% { transform: translateX(-50%) scale(1); }
+  100% { transform: translateX(calc(-50% + var(--carousel-step))) scale(.86); }
+}
+@keyframes song-left-from-center {
+  0% { transform: translateX(-50%) scale(1); }
+  100% { transform: translateX(calc(-50% - var(--carousel-step))) scale(.86); }
+}
+@keyframes song-wrap-right-to-left {
+  0% { transform: translateX(calc(-50% + var(--carousel-step))) scale(.86); opacity: 1; }
+  38% { transform: translateX(calc(-50% + var(--carousel-step) + 70px)) rotate(4deg) scale(.7); opacity: 0; }
+  39% { transform: translateX(calc(-50% - var(--carousel-step) - 70px)) rotate(-4deg) scale(.7); opacity: 0; }
+  100% { transform: translateX(calc(-50% - var(--carousel-step))) scale(.86); opacity: 1; }
+}
+@keyframes song-wrap-left-to-right {
+  0% { transform: translateX(calc(-50% - var(--carousel-step))) scale(.86); opacity: 1; }
+  38% { transform: translateX(calc(-50% - var(--carousel-step) - 70px)) rotate(-4deg) scale(.7); opacity: 0; }
+  39% { transform: translateX(calc(-50% + var(--carousel-step) + 70px)) rotate(4deg) scale(.7); opacity: 0; }
+  100% { transform: translateX(calc(-50% + var(--carousel-step))) scale(.86); opacity: 1; }
+}
+@keyframes song-enter-left {
+  0% { transform: translateX(calc(-50% - var(--carousel-step) - 70px)) scale(.75); opacity: 0; }
+  100% { transform: translateX(calc(-50% - var(--carousel-step))) scale(.86); opacity: 1; }
+}
+@keyframes song-enter-right {
+  0% { transform: translateX(calc(-50% + var(--carousel-step) + 70px)) scale(.75); opacity: 0; }
+  100% { transform: translateX(calc(-50% + var(--carousel-step))) scale(.86); opacity: 1; }
+}
 .song-card-media { display: block; overflow: hidden; width: 100%; aspect-ratio: 16 / 9; border: 3px solid var(--ink); background: var(--ink); }
 .song-card-media video, .song-card-media img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .song-card strong { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; font-size: clamp(22px, 2vw, 32px); font-weight: 950; line-height: 1.05; overflow-wrap: anywhere; }
@@ -2930,6 +2981,47 @@ input[type='range'] { accent-color: var(--accent); }
 .menu-gesture-hud small { font-size: 18px; }
 .camera-home .gesture-command, .camera-library .gesture-command, .camera-setup .gesture-command, .camera-practice .gesture-command { display: none; }
 
+/* Song loading is the only step between choosing a track and the round. */
+.song-loading-screen {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  padding: clamp(24px, 5vw, 64px) clamp(270px, 23vw, 340px) clamp(24px, 5vw, 64px) clamp(24px, 5vw, 64px);
+}
+.song-loading-card {
+  display: grid;
+  grid-template-columns: minmax(260px, .9fr) minmax(0, 1.1fr);
+  gap: clamp(24px, 4vw, 64px);
+  align-items: center;
+  width: min(1040px, 100%);
+  padding: clamp(18px, 3vw, 40px);
+  border: 5px solid var(--ink);
+  border-radius: 16px;
+  background: var(--warn);
+  box-shadow: 14px 14px 0 var(--ink);
+}
+.song-loading-art { display: grid; place-items: center; overflow: hidden; aspect-ratio: 4 / 3; border: 5px solid var(--ink); border-radius: 7px; background: var(--cyan); }
+.song-loading-art img { width: 100%; height: 100%; object-fit: cover; }
+.song-loading-art span { font-size: 58px; font-weight: 900; }
+.song-loading-copy { min-width: 0; }
+.song-loading-copy h1 { margin: 10px 0 22px; overflow-wrap: anywhere; font-size: clamp(25px, 3.8vw, 58px); font-weight: 950; line-height: 1.04; }
+.song-loading-copy p { min-height: 2.5em; font-size: clamp(20px, 2vw, 30px); font-weight: 850; line-height: 1.2; }
+.song-loading-progress { overflow: hidden; height: 18px; margin: 22px 0; border: 3px solid var(--ink); border-radius: 7px; background: var(--panel); }
+.song-loading-progress i { display: block; height: 100%; background: var(--cyan); transition: width 250ms ease; }
+.song-loading-copy .btn { min-height: 52px; font-size: 16px; }
+.tracking-options { display: grid; gap: 12px; margin: 12px 0; }
+.tracking-options > div { display: flex; flex-wrap: wrap; gap: 10px; }
+.tracking-options .btn.active, .tracking-player-choice .btn.active { background: var(--cyan); }
+.game-screen-active > .game-playing { right: 16px; left: auto; width: min(620px, calc(100vw - 310px)); }
+@media (max-width: 900px) {
+  .song-loading-screen { padding: 210px 16px 24px; }
+  .song-loading-card { grid-template-columns: 1fr; width: min(580px, 100%); }
+  .song-loading-art { max-height: 34vh; }
+  .camera-setup { top: 84px; right: 12px; bottom: auto; }
+  .game-screen-active > .game-playing { right: 8px; left: auto; width: calc(100vw - 180px); }
+}
+
 /* The full library reads as a game shelf, with a separate camera rail. */
 .library-screen {
   width: min(1500px, calc(100% - 340px));
@@ -2951,9 +3043,8 @@ input[type='range'] { accent-color: var(--accent); }
 
 @media (max-width: 900px) {
   .track-picker { width: calc(100% - 24px); gap: 12px; padding: 18px; }
+  .song-carousel { --carousel-step: 53vw; }
   .song-card { width: min(62vw, 340px); }
-  .song-card-left { --shift: -53vw; }
-  .song-card-right { --shift: 53vw; }
   .picker-import { flex-wrap: wrap; text-align: center; }
   .picker-import span { display: none; }
   .menu-gesture-hud { bottom: 10px; left: 10px; max-width: calc(100vw - 20px); }
@@ -2963,9 +3054,8 @@ input[type='range'] { accent-color: var(--accent); }
   .camera-library { top: 10px; right: 10px; width: 120px; }
 }
 @media (max-width: 560px) {
+  .song-carousel { --carousel-step: 70vw; }
   .song-card { width: min(75vw, 330px); }
-  .song-card-left { --shift: -70vw; }
-  .song-card-right { --shift: 70vw; }
   .library-screen .library { grid-template-columns: 1fr; }
   .library-screen .library-open { min-height: 0; }
   .library-screen .screen-title-row { align-items: flex-start; }
@@ -2975,5 +3065,5 @@ input[type='range'] { accent-color: var(--accent); }
 @media (prefers-reduced-motion: reduce) {
   [data-gesture-selected] { animation: none; }
   .mode-card[data-gesture-selected] { transform: none; }
-  .song-card { transition: none; }
+  .song-card, .song-carousel.is-moving-left .song-card, .song-carousel.is-moving-right .song-card { transition: none; animation: none; }
 }

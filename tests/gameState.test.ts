@@ -8,10 +8,11 @@ test('the camera stays off until the attract screen is dismissed', () => {
   assert.equal(gameReducer(gameReducer(initialGameState, { type: 'wake' }), { type: 'openHome' }).screen, 'home')
 })
 
-test('arcade navigation follows setup through results and replay', () => {
+test('a selected song goes from loading to the round without another player setup', () => {
   let state = gameReducer(initialGameState, { type: 'openArcade' })
-  state = gameReducer(state, { type: 'beginRegistration' })
+  assert.equal(state.arcadePhase, 'setup')
   state = gameReducer(state, { type: 'startCountdown' })
+  assert.equal(state.arcadePhase, 'countdown')
   state = gameReducer(state, { type: 'countdownFinished' })
   state = gameReducer(state, { type: 'finishRound' })
 
