@@ -2968,12 +2968,54 @@ input[type='range'] { accent-color: var(--accent); }
 .home-card-cyan { background: var(--cyan); }
 .home-card-yellow { background: var(--warn); }
 .home-card-cream { background: var(--panel); }
-.home-card.song-card-center { background: var(--warn); }
 .home-card-eyebrow { font-size: 13px; font-weight: 950; letter-spacing: .1em; text-transform: uppercase; }
 .home-card strong { font-size: clamp(40px, 4vw, 62px); text-transform: uppercase; }
 .home-card small { max-width: 30ch; font-size: clamp(16px, 1.4vw, 21px); font-weight: 800; line-height: 1.3; }
 .home-card i { align-self: end; font-size: 30px; font-style: normal; font-weight: 950; }
 .home-card.song-card-center i { color: var(--accent); }
+.difficulty-screen {
+  flex: 1;
+  display: grid;
+  grid-template-rows: auto auto minmax(280px, 1fr) auto;
+  align-content: center;
+  gap: 18px;
+  min-height: 0;
+  padding: 24px;
+  overflow: hidden;
+}
+.difficulty-heading { text-align: center; }
+.difficulty-heading h1 { margin: 0; font-size: clamp(42px, 5vw, 72px); line-height: 1; }
+.difficulty-heading p { margin: 8px 0 0; font-size: clamp(16px, 1.4vw, 22px); font-weight: 800; }
+.difficulty-song-bar {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  width: min(980px, 100%);
+  margin: 0 auto;
+  padding: 10px;
+  border: 4px solid var(--ink);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 7px 7px 0 var(--ink);
+}
+.difficulty-song-art { display: grid; place-items: center; overflow: hidden; aspect-ratio: 16 / 9; border: 3px solid var(--ink); border-radius: 7px; background: var(--cyan); font-size: 30px; font-weight: 950; }
+.difficulty-song-art img { width: 100%; height: 100%; object-fit: cover; }
+.difficulty-song-bar > span:nth-child(2) { display: grid; min-width: 0; gap: 3px; }
+.difficulty-song-bar small { color: var(--muted); font-size: 12px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
+.difficulty-song-bar strong { overflow: hidden; font-size: clamp(18px, 2vw, 28px); font-weight: 950; text-overflow: ellipsis; white-space: nowrap; }
+.difficulty-song-bar .btn { min-height: 48px; }
+.difficulty-carousel { --carousel-step: clamp(230px, 27vw, 370px); height: 100%; min-height: 280px; }
+.difficulty-card { top: 16px; width: clamp(230px, 25vw, 350px); min-height: 240px; padding: 24px; }
+.difficulty-card-easy { background: var(--cyan); }
+.difficulty-card-normal { background: var(--warn); }
+.difficulty-card-hard { background: var(--accent); }
+.difficulty-card > span { font-size: 13px; font-weight: 950; letter-spacing: .1em; text-transform: uppercase; }
+.difficulty-card strong { font-size: clamp(38px, 4vw, 58px); text-transform: uppercase; }
+.difficulty-card small { max-width: 24ch; font-size: clamp(15px, 1.3vw, 19px); font-weight: 800; line-height: 1.25; }
+.difficulty-card i { align-self: end; font-size: 24px; font-style: normal; font-weight: 950; }
+.difficulty-card.song-card-center i { color: var(--ink); }
+.difficulty-navigation-hint { margin: 0; text-align: center; font-size: clamp(15px, 1.3vw, 20px); font-weight: 900; }
 .picker-stage .preview-play { position: absolute; z-index: 3; right: 50%; bottom: 10px; transform: translateX(50%); }
 .picker-import { display: flex; align-items: center; justify-content: center; gap: 18px; }
 .picker-import .btn { min-height: 62px; font-size: 22px; }
@@ -3031,6 +3073,10 @@ input[type='range'] { accent-color: var(--accent); }
   .song-loading-screen { padding: 210px 16px 24px; }
   .song-loading-card { grid-template-columns: 1fr; width: min(580px, 100%); }
   .song-loading-art { max-height: 34vh; }
+  .difficulty-screen { align-content: start; padding: 180px 16px 24px; overflow: auto; }
+  .difficulty-song-bar { width: min(620px, 100%); }
+  .difficulty-carousel { --carousel-step: 51vw; min-height: 300px; }
+  .difficulty-card { width: min(60vw, 330px); }
   .camera-setup { top: 84px; right: 12px; bottom: auto; }
   .game-screen-active > .game-playing { right: 8px; left: auto; width: calc(100vw - 180px); }
 }
@@ -3076,6 +3122,14 @@ input[type='range'] { accent-color: var(--accent); }
   .home-mobile-controls { display: flex; justify-content: space-between; gap: 12px; }
   .home-mobile-controls .btn { min-width: 0; flex: 1; padding: 10px; font-size: 14px; }
   .home-navigation-hint { display: none; }
+  .difficulty-screen { padding-top: 170px; }
+  .difficulty-heading h1 { font-size: 40px; }
+  .difficulty-heading p { font-size: 15px; }
+  .difficulty-song-bar { grid-template-columns: 82px minmax(0, 1fr); }
+  .difficulty-song-bar .btn { grid-column: 1 / -1; }
+  .difficulty-carousel { --carousel-step: 70vw; min-height: 300px; }
+  .difficulty-card { width: min(72vw, 310px); }
+  .difficulty-navigation-hint { display: none; }
   .library-screen .library { grid-template-columns: 1fr; }
   .library-screen .library-open { min-height: 0; }
   .library-screen .screen-title-row { align-items: flex-start; }

@@ -51,6 +51,8 @@ export default function App() {
   const [analysisMessage, setAnalysisMessage] = useState<string | null>(null)
   const [settings, setSettings] = useState<GameSettings>(() => ({ ...loadGameSettings(), language: getLang() }))
   const [difficulty, setDifficulty] = useState<Difficulty>('normal')
+  const [choosingDifficulty, setChoosingDifficulty] = useState(false)
+  const [difficultyMotion, setDifficultyMotion] = useState<{ direction: 'left' | 'right'; turn: number } | null>(null)
   const [registrationPlayers, setRegistrationPlayers] = useState<1 | 2>(1)
   const [countdown, setCountdown] = useState(3)
   const [gameRun, setGameRun] = useState(0)
@@ -85,11 +87,19 @@ export default function App() {
 
   const go = (type: 'openHome' | 'openArcade' | 'openPractice' | 'openLibrary' | 'openSettings') => {
     playSfx('menu', settings.soundMuted)
-    if (type === 'openArcade') setSrc(null)
+    if (type === 'openArcade') {
+      setSrc(null)
+      setChoosingDifficulty(false)
+    }
     dispatch({ type })
   }
 
-  const chooseSong = () => { setSrc(null); dispatch({ type: 'chooseSong' }) }
+  const chooseSong = () => {
+    setSrc(null)
+    setChoosingDifficulty(false)
+    setDifficultyMotion(null)
+    dispatch({ type: 'chooseSong' })
+  }
 
   const updateSettings = (next: GameSettings) => {
     setSettings(next)
@@ -225,7 +235,7 @@ export default function App() {
   }, [arcadePhase, gameRun, settings.soundMuted])
 
   useEffect(() => {
-    if (activeScreen !== 'arcade' || arcadePhase !== 'setup' || !src || !track || !cameraRunning || !lobby.ready || lobby.players < registrationPlayers) return
+    if (activeScreen !== 'arcade' || arcadePhase !== 'setup' || choosingDifficulty || !src || !track || !cameraRunning || !lobby.ready || lobby.players < registrationPlayers) return
     const timer = window.setTimeout(() => {
       setGamePlayers([])
       setResultRecords([])
@@ -234,7 +244,7 @@ export default function App() {
       dispatch({ type: 'startCountdown' })
     }, 1400)
     return () => clearTimeout(timer)
-  }, [activeScreen, arcadePhase, src, track, cameraRunning, lobby.ready, lobby.players, registrationPlayers])
+  }, [activeScreen, arcadePhase, choosingDifficulty, src, track, cameraRunning, lobby.ready, lobby.players, registrationPlayers])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -346,6 +356,8 @@ export default function App() {
     play(file)
     const entry = await remember(file)
     setCurrent(entry)
+    setChoosingDifficulty(destination === 'arcade')
+    setDifficultyMotion(null)
     await refresh()
     dispatch({ type: destination === 'practice' ? 'openPractice' : 'openArcade' })
     if (entry) {
@@ -368,6 +380,8 @@ export default function App() {
     setTrack(null)
     play(blob)
     setCurrent(entry)
+    setChoosingDifficulty(destination === 'arcade')
+    setDifficultyMotion(null)
     await touch(entry.id)
     await refresh()
     dispatch({ type: destination === 'practice' ? 'openPractice' : 'openArcade' })
@@ -420,6 +434,15 @@ export default function App() {
     setHomeMotion((motion) => ({ direction, turn: (motion?.turn ?? 0) + 1 }))
     setHomeSelected((index) => (index + (direction === 'left' ? 4 : 1)) % 5)
   }
+  const moveDifficulty = (direction: 'left' | 'right') => {
+    const index = DIFFICULTIES.indexOf(difficulty)
+    setDifficultyMotion((motion) => ({ direction, turn: (motion?.turn ?? 0) + 1 }))
+    setDifficulty(DIFFICULTIES[(index + (direction === 'left' ? -1 : 1) + DIFFICULTIES.length) % DIFFICULTIES.length])
+  }
+  const startSelectedDifficulty = () => {
+    setDifficultyMotion(null)
+    setChoosingDifficulty(false)
+  }
   const selectHome = () => {
     if (homeSelected === 0) go('openArcade')
     else if (homeSelected === 1) go('openPractice')
@@ -428,7 +451,7 @@ export default function App() {
     else dispatch({ type: 'wake' })
   }
   const gestureContext: GestureContext | null = lobby.ready && navigation.screen !== 'tracking' &&
-    navigation.screen !== 'attract' && !(activeScreen === 'arcade' && src && arcadePhase !== 'results') ? pickingSong ? 'songPicker' : 'menu' : null
+    navigation.screen !== 'attract' && !(activeScreen === 'arcade' && src && arcadePhase !== 'results' && !choosingDifficulty) ? pickingSong ? 'songPicker' : 'menu' : null
   const hasTrack = !!track
 
   const menuItems = () => {
@@ -457,7 +480,7 @@ export default function App() {
       if (first) selectMenuItem(first)
     })
     return () => cancelAnimationFrame(frame)
-  }, [navigation.screen, arcadePhase, currentId, library.length, hasTrack, gestureContext, activeScreen, pickingSong, previewEntry?.id])
+  }, [navigation.screen, arcadePhase, currentId, library.length, hasTrack, gestureContext, activeScreen, pickingSong, previewEntry?.id, choosingDifficulty, difficulty])
 
   const handleGestureAction = (gesture: MenuGesture) => {
     if (activeScreen === 'arcade' && arcadePhase === 'playing' && gesture === 'back') {
@@ -469,6 +492,7 @@ export default function App() {
       if (navigation.screen === 'settings') dispatch({ type: 'closeSettings' })
       else if (activeScreen === 'arcade' && arcadePhase === 'paused') dispatch({ type: 'resume' })
       else if (activeScreen === 'arcade' && arcadePhase === 'results') chooseSong()
+      else if (choosingDifficulty) chooseSong()
       else if (navigation.screen === 'home') dispatch({ type: 'quitHome' })
       else dispatch({ type: 'openHome' })
       return
@@ -476,6 +500,11 @@ export default function App() {
     if (navigation.screen === 'home') {
       if (gesture === 'confirm') selectHome()
       else moveHome(gesture === 'previous' ? 'left' : 'right')
+      return
+    }
+    if (choosingDifficulty) {
+      if (gesture === 'confirm') startSelectedDifficulty()
+      else moveDifficulty(gesture === 'previous' ? 'left' : 'right')
       return
     }
     if (pickingSong && previewEntry) {
@@ -549,9 +578,54 @@ export default function App() {
     )
   }
 
+  const renderDifficultyPicker = () => {
+    const selectedIndex = DIFFICULTIES.indexOf(difficulty)
+    const descriptions: Record<Difficulty, string> = {
+      easy: L('Fewer cues. Find the rhythm.', '更少提示，先找到节奏。'),
+      normal: L('One clear cue at a time.', '每次一个清晰提示。'),
+      hard: L('More cues. Keep every move sharp.', '更多提示，每个动作都要精准。'),
+    }
+    return <main className="difficulty-screen" data-gesture-surface onKeyDown={(event) => {
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+        event.preventDefault()
+        moveDifficulty(event.key === 'ArrowLeft' ? 'left' : 'right')
+      } else if (event.key === 'Escape') {
+        event.preventDefault()
+        chooseSong()
+      }
+    }}>
+      <div className="difficulty-heading"><h1>{L('Choose your difficulty.', '选择难度。')}</h1><p>{L('Pick your pace, then raise your right hand or press Enter to start.', '选择节奏，然后举起右手或按 Enter 开始。')}</p></div>
+      <div className="difficulty-song-bar">
+        <span className="difficulty-song-art">{current?.thumb ? <img src={current.thumb} alt="" /> : '♪'}</span>
+        <span><small>{L('Selected song', '已选歌曲')}</small><strong>{current?.name.replace(/\.[^.]+$/, '') ?? T('Your dance')}</strong></span>
+        <button className="btn subtle" onClick={chooseSong}>{T('Change song')}</button>
+      </div>
+      <nav key={difficultyMotion?.turn ?? 0} className={`song-carousel difficulty-carousel${difficultyMotion ? ` is-moving-${difficultyMotion.direction}` : ''}`} aria-label={T('Difficulty')}>
+        {([-1, 0, 1] as const).map((offset) => {
+          const level = DIFFICULTIES[(selectedIndex + offset + DIFFICULTIES.length) % DIFFICULTIES.length]
+          const position = offset === -1 ? 'left' : offset === 1 ? 'right' : 'center'
+          return <button
+            key={level}
+            className={`song-card song-card-${position} difficulty-card difficulty-card-${level}`}
+            aria-current={offset === 0 ? 'true' : undefined}
+            aria-label={offset === 0 ? L(`Start ${level}`, `开始${T(level)}`) : T(level)}
+            data-gesture-default={offset === 0 ? '' : undefined}
+            onClick={() => offset === 0 ? startSelectedDifficulty() : moveDifficulty(offset === -1 ? 'left' : 'right')}
+          >
+            <span>{L('Difficulty', '难度')}</span>
+            <strong>{T(level)}</strong>
+            <small>{descriptions[level]}</small>
+            <i aria-hidden="true">{offset === 0 ? L('START', '开始') : offset === -1 ? '←' : '→'}</i>
+          </button>
+        })}
+      </nav>
+      <p className="difficulty-navigation-hint">{L('← Easier · Harder → · Right hand up or Enter to start', '← 更简单 · 更困难 → · 举右手或按 Enter 开始')}</p>
+    </main>
+  }
+
   const renderArcade = () => {
     if (arcadePhase === 'setup') {
-      return <div className="destination-wrap">{renderHeader('Arcade')}{!src ? renderTrackPicker('arcade') : (
+      return <div className="destination-wrap">{renderHeader('Arcade')}{!src ? renderTrackPicker('arcade') : choosingDifficulty ? renderDifficultyPicker() : (
         <main className="song-loading-screen" role="status" aria-live="polite"><div className="song-loading-card">
           <div className="song-loading-art">{current?.thumb ? <img src={current.thumb} alt="" /> : <span>♪</span>}</div>
           <div className="song-loading-copy"><span className="kicker">{L('Up next', '即将开始')}</span><h1>{current?.name.replace(/\.[^.]+$/, '') ?? T('Your dance')}</h1>
@@ -604,10 +678,6 @@ export default function App() {
           <fieldset>
             <legend>{L('Score focus', '计分重点')}</legend>
             <div>{([['full', T('Whole body')], ['upper', T('Arms only')], ['lower', T('Legs only')]] as const).map(([mode, label]) => <button key={mode} className={`btn${focus === mode ? ' active' : ''}`} aria-pressed={focus === mode} onClick={() => setFocus(mode)}>{label}</button>)}</div>
-          </fieldset>
-          <fieldset>
-            <legend>{T('Difficulty')}</legend>
-            <div>{DIFFICULTIES.map((level) => <button key={level} className={`btn${difficulty === level ? ' active' : ''}`} aria-pressed={difficulty === level} onClick={() => setDifficulty(level)}>{T(level)}</button>)}</div>
           </fieldset>
         </div>
         <button className="btn subtle tracking-back" onClick={() => dispatch({ type: 'openHome' })}>{L('Back to menu', '返回菜单')}</button>
