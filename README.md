@@ -89,6 +89,12 @@ npm run dev
 
 The production build is an installable PWA. Its interface is cached immediately; pose models and WASM are cached after first use, so first-time tracking setup still needs a connection. Imported videos remain local in IndexedDB and are never included in cloud sync.
 
+### Camera tracking check
+
+In Arcade, choose one or two players, enter the marked camera areas, and hold a T-pose to register. Registration fixes the player slots for that round; extra detections do not become players. Matching uses movement, body size, and a small on-device clothing-color sample. The camera then checks full-body landmark visibility over several seconds and asks each player to lower and raise both arms. It reports which body part or setup condition needs attention. Retry after adjusting the camera, or choose **Play anyway** if tracking quality remains limited. Practice Studio offers the same check on demand.
+
+If a registered player disappears for more than a brief gap, return to the original area and hold a T-pose to relock. The check uses only local camera frames and does not change the scoring model or measure audio/video latency. A webcam cannot guarantee identity when people overlap closely or look alike (including similar clothing); use a clear background and keep the registered players in view.
+
 ## How it works
 
 **Pose estimation** — MediaPipe Tasks Vision `pose_landmarker_lite`, BlazePose's 33 landmarks, GPU delegate with an automatic CPU fallback. All inference runs in the browser.

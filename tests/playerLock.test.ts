@@ -1,0 +1,84 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+import { createPlayerLock, matchPlayerLock, registrationCandidates } from '../src/pose/playerLock.ts'
+
+function pose(center: number, scale = 1, armsOut = true) {
+  const points = Array.from({ length: 33 }, () => ({ x: center, y: 0.5, z: 0, visibility: 1 }))
+  const put = (index: number, dx: number, y: number) => { points[index] = { x: center + dx * scale, y: 0.5 + (y - 0.5) * scale, z: 0, visibility: 1 } }
+  put(11, -0.07, 0.32)
+  put(12, 0.07, 0.32)
+  put(23, -0.05, 0.57)
+  put(24, 0.05, 0.57)
+  put(13, armsOut ? -0.16 : -0.07, armsOut ? 0.32 : 0.45)
+  put(14, armsOut ? 0.16 : 0.07, armsOut ? 0.32 : 0.45)
+  put(15, armsOut ? -0.21 : -0.07, armsOut ? 0.32 : 0.6)
+  put(16, armsOut ? 0.21 : 0.07, armsOut ? 0.32 : 0.6)
+  return points
+}
+
+test('solo registration selects the foreground dancer in the center zone', () => {
+  assert.deepEqual(registrationCandidates([pose(0.52, 0.5), pose(0.48, 1)], 1), [1])
+  assert.deepEqual(registrationCandidates([pose(0.1), pose(0.5)], 1), [1])
+})
+
+test('a background person cannot grow or take over a registered solo slot', () => {
+  let lock = createPlayerLock([pose(0.5)], 0)
+  let result = matchPlayerLock(lock, [pose(0.52), pose(0.8, 0.5)], 50)
+  assert.deepEqual(result.indices, [0])
+  lock = result.state
+  result = matchPlayerLock(lock, [pose(0.8, 0.5)], 100)
+  assert.deepEqual(result.indices, [null])
+  assert.equal(result.state.slots.length, 1)
+})
+
+test('a different shirt color rejects a same-sized background person crossing the lock', () => {
+  const red = { r: 220, g: 35, b: 35 }
+  const blue = { r: 35, g: 45, b: 220 }
+  const lock = createPlayerLock([pose(0.5)], 0, [red])
+  const result = matchPlayerLock(lock, [pose(0.5)], 50, [blue])
+  assert.deepEqual(result.indices, [null])
+  assert.deepEqual(matchPlayerLock(result.state, [pose(0.52)], 100, [red]).indices, [0])
+})
+
+test('minor lighting changes and unavailable color samples do not break the lock', () => {
+  const lock = createPlayerLock([pose(0.5)], 0, [{ r: 120, g: 90, b: 70 }])
+  const dimmer = matchPlayerLock(lock, [pose(0.52)], 50, [{ r: 85, g: 65, b: 50 }])
+  assert.deepEqual(dimmer.indices, [0])
+  assert.deepEqual(matchPlayerLock(dimmer.state, [pose(0.54)], 100, [null]).indices, [0])
+})
+
+test('a lost player is not silently replaced after a long absence', () => {
+  let lock = createPlayerLock([pose(0.5)], 0)
+  lock = matchPlayerLock(lock, [], 900).state
+  const stranger = matchPlayerLock(lock, [pose(0.5, 1, false)], 950)
+  assert.deepEqual(stranger.indices, [null])
+  assert.deepEqual(matchPlayerLock(stranger.state, [pose(0.5, 1, true)], 1000).indices, [null])
+})
+
+test('a visible T-pose held after loss deliberately restores the same slot', () => {
+  let lock = createPlayerLock([pose(0.5)], 0)
+  lock = matchPlayerLock(lock, [], 900).state
+  lock = matchPlayerLock(lock, [pose(0.5)], 1000).state
+  const restored = matchPlayerLock(lock, [pose(0.5)], 2100)
+  assert.deepEqual(restored.indices, [0])
+})
+
+test('two registered players keep separate slots when one vanishes', () => {
+  let lock = createPlayerLock([pose(0.75), pose(0.25)], 0)
+  let result = matchPlayerLock(lock, [pose(0.25), pose(0.75)], 50)
+  assert.deepEqual(result.indices, [1, 0])
+  lock = result.state
+  result = matchPlayerLock(lock, [pose(0.25)], 100)
+  assert.deepEqual(result.indices, [null, 0])
+})
+
+test('continuous crossing preserves player slots instead of re-sorting left to right', () => {
+  let lock = createPlayerLock([pose(0.75), pose(0.25)], 0)
+  const positions = [[0.69, 0.31], [0.61, 0.39], [0.53, 0.47], [0.45, 0.55], [0.37, 0.63]]
+  positions.forEach(([first, second], index) => {
+    const detections = [pose(second), pose(first)]
+    const result = matchPlayerLock(lock, detections, (index + 1) * 50)
+    assert.deepEqual(result.indices, [1, 0])
+    lock = result.state
+  })
+})

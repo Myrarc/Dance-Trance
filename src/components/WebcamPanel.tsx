@@ -1,12 +1,14 @@
 import { L, T } from '../i18n'
-import { useEffect, useRef, useState } from 'react'
-import type { PoseLandmarker } from '@mediapipe/tasks-vision'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import type { NormalizedLandmark, PoseLandmarker } from '@mediapipe/tasks-vision'
 import { createPoseLandmarker } from '../pose/landmarker'
-import { drawSkeleton, LEVEL_COLORS } from '../pose/skeleton'
+import { drawSkeleton, LEVEL_COLORS, LM } from '../pose/skeleton'
 import { computeAngles, compareToHistory, levelConnectionColors, dimmedSegments, HEAD, type Focus, type LagState, type PoseFeature } from '../pose/angles'
 import { LandmarkSmoother } from '../pose/filter'
 import { framingProblems } from '../pose/checkup'
 import { FrameMeter, frameTimestampMs, type FrameMetrics } from '../pose/frameMeter'
+import { advanceCalibration, beginCalibration, type CalibrationIssue, type CalibrationState } from '../pose/calibration'
+import { createPlayerLock, matchPlayerLock, registrationCandidates, type ColorSignature, type PlayerLock } from '../pose/playerLock'
 import { CameraRequestTimeoutError, requestCameraStream } from '../lib/cameraStream'
 import Checkup from './Checkup'
 import {
@@ -26,7 +28,6 @@ import {
   newPlayerRound,
   gradeMatch,
   scoreCue,
-  stablePlayerOrder,
   type CueFrame,
   type GamePhase,
   type HitGrade,
@@ -40,9 +41,56 @@ const READY_HOLD_MS = 1200
 const LIVE_INFERENCE_INTERVAL_MS = 50
 const LIVE_INPUT_WIDTH = 640
 const GESTURE_BEEP_GAP_MS = 400
+const APPEARANCE_SAMPLE_SIZE = 8
+
+/** A tiny chest crop helps distinguish dancers without storing or sending camera images. */
+function sampleTorsoColor(input: HTMLCanvasElement, sample: HTMLCanvasElement, pose: NormalizedLandmark[]): ColorSignature | null {
+  const [left, right, leftHip, rightHip] = [LM.lShoulder, LM.rShoulder, LM.lHip, LM.rHip].map((index) => pose[index])
+  if ([left, right, leftHip, rightHip].some((point) => !point || (point.visibility ?? 1) < 0.5)) return null
+  const shoulderY = (left.y + right.y) / 2
+  const hipY = (leftHip.y + rightHip.y) / 2
+  const shoulderWidth = Math.abs(left.x - right.x)
+  if (hipY <= shoulderY || shoulderWidth < 0.04) return null
+  const centerX = (left.x + right.x) / 2
+  const x0 = Math.max(0, centerX - shoulderWidth * 0.2)
+  const x1 = Math.min(1, centerX + shoulderWidth * 0.2)
+  const y0 = Math.max(0, shoulderY + (hipY - shoulderY) * 0.25)
+  const y1 = Math.min(1, shoulderY + (hipY - shoulderY) * 0.65)
+  if ((x1 - x0) * input.width < 4 || (y1 - y0) * input.height < 4) return null
+  if (sample.width !== APPEARANCE_SAMPLE_SIZE || sample.height !== APPEARANCE_SAMPLE_SIZE) {
+    sample.width = APPEARANCE_SAMPLE_SIZE
+    sample.height = APPEARANCE_SAMPLE_SIZE
+  }
+  const ctx = sample.getContext('2d', { willReadFrequently: true })
+  if (!ctx) return null
+  ctx.drawImage(input, x0 * input.width, y0 * input.height, (x1 - x0) * input.width, (y1 - y0) * input.height,
+    0, 0, APPEARANCE_SAMPLE_SIZE, APPEARANCE_SAMPLE_SIZE)
+  const pixels = ctx.getImageData(0, 0, APPEARANCE_SAMPLE_SIZE, APPEARANCE_SAMPLE_SIZE).data
+  let r = 0, g = 0, b = 0
+  for (let offset = 0; offset < pixels.length; offset += 4) {
+    r += pixels[offset]
+    g += pixels[offset + 1]
+    b += pixels[offset + 2]
+  }
+  const count = APPEARANCE_SAMPLE_SIZE ** 2
+  return { r: r / count, g: g / count, b: b / count }
+}
+const CALIBRATION_ADVICE: Record<CalibrationIssue, string> = {
+  missing: 'Step into view and keep the camera clear.',
+  zone: 'Move into your marked player area.',
+  body: 'Keep your shoulders and hips visible.',
+  arms: 'Keep both elbows and wrists inside the picture.',
+  feet: 'Step back until both knees and ankles are visible.',
+  head: 'Keep your head visible and face the camera.',
+  distance: 'Adjust your distance so your whole body fits clearly.',
+  sideways: 'Face the camera more directly.',
+  motion: 'Lower both arms, then lift them out to the sides.',
+  slow: 'Tracking is too slow for a reliable check. Close other camera apps.',
+}
 
 interface PlayerSetup {
   count: number
+  detected: boolean[]
   progress: number[]
   inZone: boolean[]
   tPose: boolean[]
@@ -76,6 +124,10 @@ interface Props {
   onGameScores?: (players: PlayerRound[]) => void
   onHit?: (grade: Exclude<HitGrade, 'miss'>, target: CueEvent) => void
   onScoreDebug?: (entries: ScoreDebug[]) => void
+  requireCalibration?: boolean
+  registrationPlayers?: 1 | 2
+  onRegistrationPlayersChange?: (count: 1 | 2) => void
+  onCalibrationChange?: (state: CalibrationState | null) => void
   gestureContext?: GestureContext | null
   onGestureAction?: (gesture: MenuGesture) => void
 }
@@ -104,6 +156,10 @@ export default function WebcamPanel({
   onGameScores,
   onHit,
   onScoreDebug,
+  requireCalibration = false,
+  registrationPlayers = 1,
+  onRegistrationPlayersChange,
+  onCalibrationChange,
   gestureContext = null,
   onGestureAction,
 }: Props) {
@@ -118,6 +174,7 @@ export default function WebcamPanel({
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const inferenceCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  const appearanceCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const landmarkerRef = useRef<PoseLandmarker | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const emaRef = useRef<number | null>(null)
@@ -130,7 +187,9 @@ export default function WebcamPanel({
   const readyHoldRef = useRef([0, 0])
   const stableCountRef = useRef({ count: 0, since: 0 })
   const lobbyReadyRef = useRef(false)
-  const playerXRef = useRef<number[]>([])
+  const playerLockRef = useRef<PlayerLock | null>(null)
+  const registrationPlayersRef = useRef(registrationPlayers)
+  registrationPlayersRef.current = registrationPlayers
   const registeredPlayerCountRef = useRef(1)
   const roundsRef = useRef<PlayerRound[]>([newPlayerRound(), newPlayerRound()])
   const gestureHoldRef = useRef<GestureHold>({ candidate: null, since: 0, latched: false })
@@ -142,6 +201,9 @@ export default function WebcamPanel({
   const latestRef = useRef<{ feature: PoseFeature; framing: string[] } | null>(null)
   const lastUiRef = useRef(0)
   const lastInferenceAtRef = useRef(0)
+  const calibrationRef = useRef<CalibrationState | null>(null)
+  const requireCalibrationRef = useRef(requireCalibration)
+  requireCalibrationRef.current = requireCalibration
   const mirrorModeRef = useRef<MirrorMode>('auto')
 
   // Aggregates for the practice session, so a signed-in dancer keeps a history
@@ -158,10 +220,13 @@ export default function WebcamPanel({
   const [problems, setProblems] = useState<string[]>([])
   const [framing, setFraming] = useState<string[]>([])
   const [checking, setChecking] = useState(false)
-  const [capture, setCapture] = useState({ width: 0, height: 0, fps: 0 })
+  const [capture, setCapture] = useState({ width: 0, height: 0 })
   const [metrics, setMetrics] = useState<FrameMetrics | null>(null)
+  const [calibration, setCalibration] = useState<CalibrationState | null>(null)
+  const [trackingLost, setTrackingLost] = useState(false)
   const [playerSetup, setPlayerSetup] = useState<PlayerSetup>({
-    count: 0,
+    count: registrationPlayers,
+    detected: [],
     progress: [],
     inZone: [],
     tPose: [],
@@ -171,13 +236,49 @@ export default function WebcamPanel({
     gesture: null,
     progress: 0,
   })
-  const playerSetupCountRef = useRef(playerSetup.count)
-  playerSetupCountRef.current = playerSetup.count
+  const livePlayerCountRef = useRef(0)
 
   mirrorModeRef.current = mirrorMode
   gestureContextRef.current = gestureContext
   onGestureActionRef.current = onGestureAction
-  const gameplaySkeletonsVisible = showSkeletons
+  const gameplaySkeletonsVisible = showSkeletons || calibration?.phase === 'framing' || calibration?.phase === 'movement'
+
+  const beginCheck = () => {
+    const count = playerLockRef.current?.slots.length ?? livePlayerCountRef.current
+    if (!running || (count !== 1 && count !== 2)) return
+    const next = beginCalibration(count, performance.now())
+    calibrationRef.current = next
+    setCalibration(next)
+    onCalibrationChange?.(next)
+  }
+
+  const resetPlayers = useCallback(() => {
+    playerLockRef.current = null
+    registeredPlayerCountRef.current = registrationPlayersRef.current
+    readyHoldRef.current = [0, 0]
+    stableCountRef.current = { count: 0, since: performance.now() }
+    lobbyReadyRef.current = false
+    livePlayerCountRef.current = 0
+    playerSmoothersRef.current.forEach((smoother) => smoother.reset())
+    playerWorldSmoothersRef.current.forEach((smoother) => smoother.reset())
+    gestureHoldRef.current = { candidate: null, since: 0, latched: false }
+    latestRef.current = null
+    emaRef.current = null
+    lagRef.current = null
+    setScore(null)
+    setLag(null)
+    calibrationRef.current = null
+    setCalibration(null)
+    setLobbyReady(false)
+    setTrackingLost(false)
+    setPlayerSetup({ count: registrationPlayersRef.current, detected: [], progress: [], inZone: [], tPose: [] })
+    onCalibrationChange?.(null)
+    onLobbyChange?.(false, 0)
+  }, [onCalibrationChange, onLobbyChange])
+
+  useEffect(() => {
+    if (running && gamePhase === 'lobby') resetPlayers()
+  }, [registrationPlayers, running, gamePhase, resetPlayers])
 
   useEffect(() => {
     if (!gestureHoldRef.current.latched) {
@@ -191,7 +292,7 @@ export default function WebcamPanel({
     // The reference video may still expose the previous round's final time for
     // one camera frame while it is being rewound. Do not let that stale clock
     // consume the new round's targets as misses.
-    registeredPlayerCountRef.current = Math.max(1, playerSetupCountRef.current)
+    registeredPlayerCountRef.current = playerLockRef.current?.slots.length ?? registrationPlayersRef.current
     roundsRef.current = [newPlayerRound(), newPlayerRound()]
     lagStatesRef.current = [{ lag: 0 }, { lag: 0 }]
     movementHistoryRef.current = [[], []]
@@ -241,7 +342,6 @@ export default function WebcamPanel({
       setCapture({
         width: settings?.width ?? 0,
         height: settings?.height ?? 0,
-        fps: settings?.frameRate ?? 0,
       })
       const v = videoRef.current!
       v.srcObject = stream
@@ -254,6 +354,7 @@ export default function WebcamPanel({
       sessionRef.current = { startedAt: performance.now(), sum: 0, count: 0, best: 0 }
       readyHoldRef.current = [0, 0]
       stableCountRef.current = { count: 0, since: performance.now() }
+      playerLockRef.current = null
       lobbyReadyRef.current = false
       gestureHoldRef.current = { candidate: null, since: 0, latched: false }
       setLobbyReady(false)
@@ -333,11 +434,18 @@ export default function WebcamPanel({
     gestureHoldRef.current = { candidate: null, since: 0, latched: false }
     setRunning(false)
     setLobbyReady(false)
-    setPlayerSetup({ count: 0, progress: [], inZone: [], tPose: [] })
+    setPlayerSetup({ count: registrationPlayersRef.current, detected: [], progress: [], inZone: [], tPose: [] })
+    playerLockRef.current = null
+    livePlayerCountRef.current = 0
+    setTrackingLost(false)
+    onLobbyChange?.(false, 0)
     setScore(null)
     setLag(null)
     setProblems([])
     setMetrics(null)
+    calibrationRef.current = null
+    setCalibration(null)
+    onCalibrationChange?.(null)
     const cv = canvasRef.current
     cv?.getContext('2d')?.clearRect(0, 0, cv.width, cv.height)
   }
@@ -380,46 +488,40 @@ export default function WebcamPanel({
       const ctx = cv.getContext('2d')!
       ctx.clearRect(0, 0, cv.width, cv.height)
 
-      const detectedByX = res.landmarks
+      const detected = res.landmarks
         .map((pose, index) => ({ pose, world: res.worldLandmarks[index], x: playerScreenX(pose) }))
         .filter((player) => player.x !== null)
-        .sort((a, b) => a.x! - b.x!)
-        .slice(0, 2)
-      const detected = stablePlayerOrder(
-        detectedByX.map((player) => ({ ...player, x: player.x! })),
-        playerXRef.current,
-      )
-      if (gamePhase !== 'playing' || registeredPlayerCountRef.current === detected.length) {
-        playerXRef.current = detected.map((player) => player.x)
-      }
-      const count = detected.length
+        .map((player) => ({ ...player, x: player.x!, appearance: sampleTorsoColor(
+          input, appearanceCanvasRef.current ??= document.createElement('canvas'), player.pose,
+        ) }))
+      const lock = playerLockRef.current
+      const registrationIndices = lock ? [] : registrationCandidates(detected.map((player) => player.pose), registrationPlayersRef.current)
+      const match = lock ? matchPlayerLock(lock, detected.map((player) => player.pose), frameNow, detected.map((player) => player.appearance)) : null
+      if (match) playerLockRef.current = match.state
+      const matched = (match?.indices ?? registrationIndices).map((index) => index === null ? null : detected[index])
+      const count = matched.filter(Boolean).length
+      livePlayerCountRef.current = count
       const registeredPlayerCount = registeredPlayerCountRef.current
-      const scoreSlots = detected.map((player, index) => {
-        if (registeredPlayerCount !== 2 || detected.length === 2 || playerXRef.current.length !== 2) return index
-        return Math.abs(player.x - playerXRef.current[0]) <= Math.abs(player.x - playerXRef.current[1]) ? 0 : 1
-      })
-      const players = detected.map((player, index) => {
-        const slot = scoreSlots[index] ?? index
-        return {
+      const players = matched.map((player, slot) => player ? {
           ...player,
           pose: playerSmoothersRef.current[slot].filter(player.pose, timestampMs / 1000),
           world: player.world
             ? playerWorldSmoothersRef.current[slot].filter(player.world, timestampMs / 1000)
             : undefined,
-        }
-      })
-      if (stableCountRef.current.count !== count) {
+        } : null)
+      if (!lobbyReadyRef.current && stableCountRef.current.count !== count) {
         stableCountRef.current = { count, since: frameNow }
         readyHoldRef.current = [0, 0]
       }
 
-      const setup: PlayerSetup = { count, progress: [], inZone: [], tPose: [] }
+      const setup: PlayerSetup = { count: registrationPlayersRef.current, detected: [], progress: [], inZone: [], tPose: [] }
       const poses = players.map((player, index) => {
-        const pose = player.pose
-        const inZone = inPlayerZone(player.x!, index, count)
-        const tPose = isTPose(pose)
+        const pose = player?.pose
+        const inZone = !!player && inPlayerZone(player.x, index, registrationPlayersRef.current)
+        const tPose = !!pose && isTPose(pose)
         if (!lobbyReadyRef.current && inZone && tPose) readyHoldRef.current[index] ||= frameNow
         else if (!lobbyReadyRef.current) readyHoldRef.current[index] = 0
+        setup.detected.push(!!pose)
         setup.inZone.push(inZone)
         setup.tPose.push(tPose)
         setup.progress.push(
@@ -427,17 +529,37 @@ export default function WebcamPanel({
             ? Math.min(1, (frameNow - readyHoldRef.current[index]) / READY_HOLD_MS)
             : 0,
         )
-        return pose
+        return pose ?? null
       })
 
       if (
         !lobbyReadyRef.current &&
-        count > 0 &&
+        count === registrationPlayersRef.current &&
         frameNow - stableCountRef.current.since > 500 &&
         setup.progress.every((progress) => progress >= 1)
       ) {
+        playerLockRef.current = createPlayerLock(matched.map((player) => player!.pose), frameNow,
+          matched.map((player) => player!.appearance))
+        registeredPlayerCountRef.current = registrationPlayersRef.current
         lobbyReadyRef.current = true
         setLobbyReady(true)
+      }
+
+      if (lobbyReadyRef.current && requireCalibrationRef.current && !calibrationRef.current) {
+        const next = beginCalibration(registrationPlayersRef.current, frameNow)
+        calibrationRef.current = next
+        setCalibration(next)
+        onCalibrationChange?.(next)
+      }
+      const activeCheck = calibrationRef.current
+      if (activeCheck && (activeCheck.phase === 'framing' || activeCheck.phase === 'movement')) {
+        const checkPoses = matched.map((player) => player?.pose ?? null)
+        const next = advanceCalibration(activeCheck, checkPoses, frameNow, trackHeadRef.current)
+        calibrationRef.current = next
+        if (next.phase !== activeCheck.phase) {
+          setCalibration(next)
+          onCalibrationChange?.(next)
+        }
       }
 
       const pose = poses[0]
@@ -447,10 +569,10 @@ export default function WebcamPanel({
         progress: gestureHoldRef.current.latched ? 1 : 0,
         fired: null as MenuGesture | null,
       }
-      if (lobbyReadyRef.current && gestureContextRef.current) {
+      if (lobbyReadyRef.current && gestureContextRef.current && calibrationRef.current?.phase !== 'framing' && calibrationRef.current?.phase !== 'movement') {
         gestureReading = advanceGestureHold(
           gestureHoldRef.current,
-          detectMenuGesture(pose),
+          detectMenuGesture(pose ?? undefined),
           frameNow,
         )
         gestureHoldRef.current = gestureReading
@@ -458,7 +580,6 @@ export default function WebcamPanel({
       }
       const target = targetRef.current
       let frameScore: number | null = null
-      const frameScores: (number | null)[] = Array.from({ length: registeredPlayerCount }, () => null)
       const playerFrames: (CueFrame | null)[] = Array.from({ length: registeredPlayerCount }, () => null)
       let frameProblems: string[] = []
       let frameLag: number | null = null
@@ -477,7 +598,7 @@ export default function WebcamPanel({
           target.history,
           target.time,
           mirrored,
-          lagStatesRef.current[scoreSlots[0] ?? 0],
+          lagStatesRef.current[0],
           focusRef.current,
           trackHeadRef.current,
         )
@@ -489,8 +610,7 @@ export default function WebcamPanel({
           dimmed: dimmedSegments(focusRef.current),
         })
         frameScore = cmp.score
-        frameScores[scoreSlots[0] ?? 0] = cmp.score
-        playerFrames[scoreSlots[0] ?? 0] = { feature: user, landmarks: pose }
+        playerFrames[0] = { feature: user, landmarks: pose }
         frameProblems = cmp.problems
         frameLag = cmp.lag
       }
@@ -500,18 +620,16 @@ export default function WebcamPanel({
           mirrorModeRef.current === 'auto'
             ? target.facing !== 'back'
             : mirrorModeRef.current === 'mirror'
-        const slot = scoreSlots[1] ?? 1
         const cmp = compareToHistory(
           second,
           target.history,
           target.time,
           mirrored,
-          lagStatesRef.current[slot],
+          lagStatesRef.current[1],
           focusRef.current,
           trackHeadRef.current,
         )
-        frameScores[slot] = cmp.score
-        playerFrames[slot] = { feature: second, landmarks: poses[1] }
+        playerFrames[1] = { feature: second, landmarks: poses[1] }
         drawSkeleton(ctx, poses[1], cv.width, cv.height, {
           color: LEVEL_COLORS.na,
           lineWidth: 7,
@@ -582,6 +700,7 @@ export default function WebcamPanel({
       }
       if (!lobbyReadyRef.current) {
         for (const playerPose of poses) {
+          if (!playerPose) continue
           drawSkeleton(ctx, playerPose, cv.width, cv.height, {
             color: LEVEL_COLORS.na,
             lineWidth: 7,
@@ -637,7 +756,11 @@ export default function WebcamPanel({
             ? targetRef.current.facing !== 'back'
             : mirrorModeRef.current === 'mirror',
         )
-        if (!lobbyReadyRef.current) setPlayerSetup(setup)
+        if (gamePhase === 'lobby') setPlayerSetup(setup)
+        setTrackingLost(!!playerLockRef.current?.slots.some((slot) => frameNow - slot.lastSeenAt > 750))
+        if (calibrationRef.current?.phase === 'framing' || calibrationRef.current?.phase === 'movement') {
+          setCalibration(calibrationRef.current)
+        }
         onLobbyChange?.(lobbyReadyRef.current, count)
         setGestureFeedback({ gesture: gestureReading.candidate, progress: gestureReading.progress })
       }
@@ -653,7 +776,7 @@ export default function WebcamPanel({
       if (v && 'cancelVideoFrameCallback' in v) v.cancelVideoFrameCallback(handle)
       else cancelAnimationFrame(handle)
     }
-  }, [running, targetRef, gamePhase, gameRun, onGameScores, onHit, onLobbyChange, onScoreDebug])
+  }, [running, targetRef, gamePhase, gameRun, onGameScores, onHit, onLobbyChange, onScoreDebug, onCalibrationChange])
 
   return (
     <section className="panel">
@@ -678,7 +801,7 @@ export default function WebcamPanel({
         {running && !lobbyReady && (
           <div className={`player-lobby ${playerSetup.count === 1 ? 'solo' : ''}`} aria-live="polite">
             {(playerSetup.count === 1 ? [0] : [0, 1]).map((index) => {
-              const detected = index < playerSetup.count
+              const detected = playerSetup.detected[index] ?? false
               const progress = playerSetup.progress[index] ?? 0
               const instruction = !detected
                 ? T('Step into this area')
@@ -712,6 +835,28 @@ export default function WebcamPanel({
             ))}
           </div>
         )}
+        {running && gamePhase === 'lobby' && lobbyReady && calibration && !checking && (
+          <div className="calibration-card" role="status" aria-live="polite">
+            <strong>{T(calibration.phase === 'framing' ? 'Checking full-body tracking' : calibration.phase === 'movement' ? 'Checking movement tracking' : calibration.phase === 'passed' ? 'Tracking check passed' : 'Tracking needs attention')}</strong>
+            <p>{T(calibration.phase === 'framing' ? 'Stand in your area with your whole body visible.' : calibration.phase === 'movement' ? 'Lower both arms, then lift them out to the sides.' : calibration.phase === 'passed' ? 'Your pose stayed visible and both arm positions were detected.' : 'Adjust your camera setup and try again. You can still play with reduced tracking quality.')}</p>
+            {(calibration.phase === 'passed' || calibration.phase === 'failed') && (
+              <ul>
+                {calibration.players.map((player, index) => (
+                  <li key={index}>
+                    <b>{L(`Player ${index + 1}`, `玩家 ${index + 1}`)}</b>
+                    <span>{player.reason ? T(CALIBRATION_ADVICE[player.reason]) : L(`${Math.round(player.goodFrames / Math.max(1, player.frames) * 100)}% full-body visibility`, `全身可见率 ${Math.round(player.goodFrames / Math.max(1, player.frames) * 100)}%`)}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {(calibration.phase === 'passed' || calibration.phase === 'failed') && <button className="btn subtle" onClick={beginCheck}>{T('Check again')}</button>}
+          </div>
+        )}
+        {running && lobbyReady && trackingLost && (
+          <div className="tracking-lock-warning" role="status">
+            {T('Tracking lost — return to your area and hold a T-pose to relock.')}
+          </div>
+        )}
         {import.meta.env.DEV && running && checking && (
           <div className="stage-overlay checkup-overlay">
             <Checkup read={() => latestRef.current} onClose={() => setChecking(false)} />
@@ -741,7 +886,7 @@ export default function WebcamPanel({
         )}
         {running && metrics && (
           <div className="tracking-diagnostics">
-            {capture.width}×{capture.height} · camera {capture.fps ? Math.round(capture.fps) : '—'} fps · tracking{' '}
+            {capture.width}×{capture.height} · camera {metrics.cameraFps} fps · tracking{' '}
             {metrics.trackingFps} fps
             {metrics.droppedFrames > 0 ? ` · skipped ${metrics.droppedFrames}` : ''}
           </div>
@@ -750,10 +895,21 @@ export default function WebcamPanel({
 
       <div className="controls">
         <div className="ctrl-group">
+          {gamePhase === 'lobby' && !requireCalibration && onRegistrationPlayersChange && ([1, 2] as const).map((count) => (
+            <button key={count} className={`btn ${registrationPlayers === count ? 'active' : ''}`} aria-pressed={registrationPlayers === count} onClick={() => onRegistrationPlayersChange(count)}>
+              {L(`${count} player${count === 1 ? '' : 's'}`, `${count} 位玩家`)}
+            </button>
+          ))}
           {running && (
             <button className="btn" onClick={stop}>
               {T('Stop camera')}
             </button>
+          )}
+          {running && gamePhase === 'lobby' && lobbyReady && (
+            <button className="btn" onClick={resetPlayers}>{T('Register players again')}</button>
+          )}
+          {running && gamePhase === 'lobby' && lobbyReady && !requireCalibration && (calibration?.phase !== 'framing' && calibration?.phase !== 'movement') && (
+            <button className="btn" onClick={beginCheck}>{T('Check tracking')}</button>
           )}
           <span className="ctrl-label">{T('Practise')}</span>
           {(
