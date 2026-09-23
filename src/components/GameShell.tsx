@@ -42,9 +42,8 @@ function useModalFocus(ref: RefObject<HTMLElement | null>) {
 
 export function Brand({ compact = false }: { compact?: boolean }) {
   return (
-    <div className={`brand-lockup${compact ? ' compact' : ''}`} aria-label="Dance Trance">
-      <span className="brand-dance">Dance</span>
-      <span className="brand-trance">Trance</span>
+    <div className={`brand-lockup${compact ? ' compact' : ''}`}>
+      <img src={`${import.meta.env.BASE_URL}logo.png`} alt="Dance Trance" />
     </div>
   )
 }
