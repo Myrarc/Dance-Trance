@@ -1,5 +1,6 @@
 import { L, T } from '../i18n'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { NormalizedLandmark, PoseLandmarker } from '@mediapipe/tasks-vision'
 import { createPoseLandmarker } from '../pose/landmarker'
 import { drawSkeleton, LEVEL_COLORS, LM } from '../pose/skeleton'
@@ -10,6 +11,7 @@ import { FrameMeter, frameTimestampMs, type FrameMetrics } from '../pose/frameMe
 import { advanceCalibration, beginCalibration, type CalibrationIssue, type CalibrationState } from '../pose/calibration'
 import { createPlayerLock, matchPlayerLock, registrationCandidates, type ColorSignature, type PlayerLock } from '../pose/playerLock'
 import { CameraRequestTimeoutError, requestCameraStream } from '../lib/cameraStream'
+import { playSfx } from '../lib/sfx'
 import Checkup from './Checkup'
 import {
   advanceGestureFromPose,
@@ -131,6 +133,7 @@ interface Props {
   onCalibrationChange?: (state: CalibrationState | null) => void
   gestureContext?: GestureContext | null
   onGestureAction?: (gesture: MenuGesture) => void
+  soundMuted?: boolean
   onRunningChange?: (running: boolean) => void
 }
 
@@ -164,6 +167,7 @@ export default function WebcamPanel({
   onCalibrationChange,
   gestureContext = null,
   onGestureAction,
+  soundMuted = false,
   onRunningChange,
 }: Props) {
   const focusRef = useRef<Focus>('full')
@@ -199,7 +203,7 @@ export default function WebcamPanel({
   const pauseHoldRef = useRef<ReturnType<typeof advancePauseHold>['hold']>(null)
   const gestureContextRef = useRef(gestureContext)
   const onGestureActionRef = useRef(onGestureAction)
-  const audioContextRef = useRef<AudioContext | null>(null)
+  const soundMutedRef = useRef(soundMuted)
   // Latest reading, so the guided check can sample without its own detector.
   const latestRef = useRef<{ feature: PoseFeature; framing: string[] } | null>(null)
   const lastUiRef = useRef(0)
@@ -236,9 +240,11 @@ export default function WebcamPanel({
     rightHandRaised: [],
   })
   const [lobbyReady, setLobbyReady] = useState(false)
-  const [gestureFeedback, setGestureFeedback] = useState<{ gesture: MenuGesture | null; progress: number }>({
+  const [gestureFeedback, setGestureFeedback] = useState<{ gesture: MenuGesture | null; progress: number; beeps: number; latched: boolean }>({
     gesture: null,
     progress: 0,
+    beeps: 0,
+    latched: false,
   })
   const [pauseProgress, setPauseProgress] = useState(0)
   const livePlayerCountRef = useRef(0)
@@ -246,6 +252,7 @@ export default function WebcamPanel({
   mirrorModeRef.current = mirrorMode
   gestureContextRef.current = gestureContext
   onGestureActionRef.current = onGestureAction
+  soundMutedRef.current = soundMuted
   const gameplaySkeletonsVisible = showSkeletons || calibration?.phase === 'framing' || calibration?.phase === 'movement'
 
   const beginCheck = () => {
@@ -292,7 +299,7 @@ export default function WebcamPanel({
     if (!gestureHoldRef.current.latched) {
       gestureHoldRef.current = { ...EMPTY_GESTURE_HOLD }
     }
-    setGestureFeedback({ gesture: null, progress: 0 })
+    setGestureFeedback({ gesture: null, progress: 0, beeps: 0, latched: false })
   }, [gestureContext])
 
   useEffect(() => {
@@ -354,11 +361,6 @@ export default function WebcamPanel({
       const v = videoRef.current!
       v.srcObject = stream
       await v.play()
-      const AudioContextClass = window.AudioContext ?? (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
-      if (AudioContextClass) {
-        audioContextRef.current ??= new AudioContextClass()
-        await audioContextRef.current.resume()
-      }
       sessionRef.current = { startedAt: performance.now(), sum: 0, count: 0, best: 0 }
       readyHoldRef.current = [0, 0]
       stableCountRef.current = { count: 0, since: performance.now() }
@@ -379,22 +381,6 @@ export default function WebcamPanel({
     } finally {
       setStarting(false)
     }
-  }
-
-  const playGestureBeep = (step: 1 | 2 | 3) => {
-    const audio = audioContextRef.current
-    if (!audio) return
-    const oscillator = audio.createOscillator()
-    const gain = audio.createGain()
-    oscillator.type = 'square'
-    oscillator.frequency.value = step === 2 ? 660 : 880
-    gain.gain.setValueAtTime(0.0001, audio.currentTime)
-    gain.gain.exponentialRampToValueAtTime(0.35, audio.currentTime + 0.01)
-    gain.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + 0.1)
-    oscillator.connect(gain)
-    gain.connect(audio.destination)
-    oscillator.start()
-    oscillator.stop(audio.currentTime + 0.11)
   }
 
   const stop = () => {
@@ -584,7 +570,10 @@ export default function WebcamPanel({
       if (lobbyReadyRef.current && gestureContextRef.current && calibrationRef.current?.phase !== 'framing' && calibrationRef.current?.phase !== 'movement') {
         gestureReading = advanceGestureFromPose(gestureHoldRef.current, pose ?? undefined, frameNow)
         gestureHoldRef.current = gestureReading
-        if (gestureReading.beep) playGestureBeep(gestureReading.beep)
+        if (gestureReading.beep) playSfx(
+          gestureReading.beep === 1 ? 'gestureOne' : gestureReading.beep === 2 ? 'gestureTwo' : 'gestureThree',
+          soundMutedRef.current,
+        )
         if (gestureReading.fired) onGestureActionRef.current?.(gestureReading.fired)
       }
       const target = targetRef.current
@@ -771,7 +760,7 @@ export default function WebcamPanel({
           setCalibration(calibrationRef.current)
         }
         onLobbyChange?.(lobbyReadyRef.current, count)
-        setGestureFeedback({ gesture: gestureReading.candidate, progress: gestureReading.progress })
+        setGestureFeedback({ gesture: gestureReading.candidate, progress: gestureReading.progress, beeps: gestureReading.beeps, latched: gestureReading.latched })
         setPauseProgress(pauseReading.progress)
       }
       if (frameNow - lastMetricsAt >= 1000) {
@@ -812,7 +801,15 @@ export default function WebcamPanel({
     </div>
   )
 
+  const activeGesture = gestureFeedback.gesture
+  const showGestureCue = running && lobbyReady && gestureContext && activeGesture && gestureFeedback.beeps > 0 &&
+    !checking && calibration?.phase !== 'framing' && calibration?.phase !== 'movement'
+  const gesturePose = activeGesture === 'confirm' ? L('RIGHT HAND UP', '举起右手')
+    : activeGesture === 'back' ? L('BACK GESTURE', '返回手势')
+      : activeGesture === 'previous' ? L('LEFT ARM OUT', '左臂平伸') : L('RIGHT ARM OUT', '右臂平伸')
+
   return (
+    <>
     <section className="panel">
       <div className="panel-head">
         <h2>{T('You')}</h2>
@@ -889,21 +886,6 @@ export default function WebcamPanel({
                 {lag < 0.15 ? T('in time') : L(`${lag.toFixed(1)}s behind`, `慢 ${lag.toFixed(1)} 秒`)}
               </span>
             )}
-          </div>
-        )}
-        {running && lobbyReady && gestureContext && !checking && calibration?.phase !== 'framing' && calibration?.phase !== 'movement' && (!requireCalibration || gestureFeedback.gesture) && (
-          <div className={`gesture-command${gestureFeedback.gesture ? '' : ' is-idle'}`} aria-live="polite">
-            <strong>{gestureFeedback.gesture ? T(gestureLabel(gestureFeedback.gesture, gestureContext)) : T('Gesture controls ready')}</strong>
-            <span>
-              {gestureFeedback.gesture
-                ? gestureFeedback.progress >= 1
-                  ? gestureFeedback.gesture === 'previous' || gestureFeedback.gesture === 'next'
-                    ? L('Keep holding to browse · lower to stop', '保持姿势继续浏览 · 放下即停止')
-                    : T('Return to neutral')
-                  : T('Hold steady')
-                : gestureContext === 'results' ? T('Right hand up: replay · left hand up: songs') : T('Make a navigation gesture')}
-            </span>
-            <i style={{ transform: `scaleX(${gestureFeedback.progress})` }} />
           </div>
         )}
         {gamePhase === 'playing' && pauseProgress > 0 && <div className="pause-gesture-progress" role="status">{T('Hold crossed arms to pause')} <i style={{ transform: `scaleX(${pauseProgress})` }} /></div>}
@@ -985,5 +967,22 @@ export default function WebcamPanel({
         </div>}
       </div>
     </section>
+    {showGestureCue && createPortal(
+      <div className={`gesture-cue gesture-cue-${activeGesture}`}>
+        <div className="gesture-cue-heading">
+          <span className="gesture-cue-symbol" aria-hidden="true">{activeGesture === 'previous' ? '←' : activeGesture === 'next' ? '→' : activeGesture === 'back' ? '×' : '↑'}</span>
+          <div><span className="gesture-cue-pose">{gesturePose}</span><strong aria-live="polite">{T(gestureLabel(activeGesture, gestureContext))}</strong></div>
+          <b className="gesture-cue-count" aria-hidden="true">{gestureFeedback.beeps}<small>/ 3</small></b>
+        </div>
+        <div className="gesture-cue-steps" aria-hidden="true">{[1, 2, 3].map((step) => <i key={step} className={step <= gestureFeedback.beeps ? 'is-lit' : ''} />)}</div>
+        <div className="gesture-cue-track" role="progressbar" aria-label={L('Gesture hold', '手势保持进度')} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(gestureFeedback.progress * 100)}><i style={{ width: `${gestureFeedback.progress * 100}%` }} /></div>
+        <p>{gestureFeedback.latched
+          ? activeGesture === 'previous' || activeGesture === 'next'
+            ? L('Keep holding to browse · lower to stop', '保持姿势继续浏览 · 放下即停止')
+            : L('Lower your hand to choose again', '放下手后可再次选择')
+          : L('Hold steady for three beats', '保持姿势，等待三声提示')}</p>
+      </div>, document.body,
+    )}
+    </>
   )
 }

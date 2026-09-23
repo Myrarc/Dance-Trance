@@ -102,6 +102,7 @@ export default function App() {
   }
 
   const updateSettings = (next: GameSettings) => {
+    if (settings.soundMuted && !next.soundMuted) playSfx('menu', false)
     setSettings(next)
     saveGameSettings(next)
     setLang(next.language)
@@ -198,12 +199,14 @@ export default function App() {
     if (navigation.screen !== 'attract') return
     const wake = (event: KeyboardEvent) => {
       if (event.repeat || ['Shift', 'Control', 'Alt', 'Meta', 'Tab'].includes(event.key)) return
+      playSfx('menu', settings.soundMuted)
       dispatch({ type: 'wake' })
     }
     window.addEventListener('keydown', wake)
     let frame = 0
     const pollGamepad = () => {
       if (navigator.getGamepads?.().some((pad) => pad?.buttons.some((button) => button.pressed))) {
+        playSfx('menu', settings.soundMuted)
         dispatch({ type: 'wake' })
         return
       }
@@ -211,7 +214,7 @@ export default function App() {
     }
     frame = requestAnimationFrame(pollGamepad)
     return () => { window.removeEventListener('keydown', wake); cancelAnimationFrame(frame) }
-  }, [navigation.screen])
+  }, [navigation.screen, settings.soundMuted])
 
   useEffect(() => {
     if (arcadePhase !== 'countdown') return
@@ -424,17 +427,22 @@ export default function App() {
 
   const pickingSong = !src && navigation.screen !== 'settings' && (activeScreen === 'arcade' || activeScreen === 'practice')
   useEffect(() => { if (!pickingSong) setCarouselMotion(null) }, [pickingSong])
+  const playNavigationCue = (direction: 'left' | 'right') =>
+    playSfx(direction === 'left' ? 'navigateLeft' : 'navigateRight', settings.soundMuted)
   const moveSong = (direction: 'left' | 'right') => {
     if (!previewEntry || library.length < 2) return
+    playNavigationCue(direction)
     const index = library.findIndex((entry) => entry.id === previewEntry.id)
     setCarouselMotion((motion) => ({ direction, turn: (motion?.turn ?? 0) + 1 }))
     setGestureSelectedId(library[(index + (direction === 'left' ? -1 : 1) + library.length) % library.length].id)
   }
   const moveHome = (direction: 'left' | 'right') => {
+    playNavigationCue(direction)
     setHomeMotion((motion) => ({ direction, turn: (motion?.turn ?? 0) + 1 }))
     setHomeSelected((index) => (index + (direction === 'left' ? 4 : 1)) % 5)
   }
   const moveDifficulty = (direction: 'left' | 'right') => {
+    playNavigationCue(direction)
     const index = DIFFICULTIES.indexOf(difficulty)
     setDifficultyMotion((motion) => ({ direction, turn: (motion?.turn ?? 0) + 1 }))
     setDifficulty(DIFFICULTIES[(index + (direction === 'left' ? -1 : 1) + DIFFICULTIES.length) % DIFFICULTIES.length])
@@ -520,7 +528,10 @@ export default function App() {
       else items[index].click()
       return
     }
-    selectMenuItem(items[(index + (gesture === 'previous' ? -1 : 1) + items.length) % items.length])
+    if (items.length < 2) return
+    const direction = gesture === 'previous' ? 'left' : 'right'
+    playNavigationCue(direction)
+    selectMenuItem(items[(index + (direction === 'left' ? -1 : 1) + items.length) % items.length])
   }
 
   const renderHeader = (title: string) => (
@@ -657,14 +668,14 @@ export default function App() {
       <LangGlobe />
       <UpdateToast />
       <input ref={fileInputRef} hidden type="file" accept="video/*" onChange={(event) => { void loadFile(event.target.files?.[0], fileDestinationRef.current); event.target.value = '' }} />
-      {navigation.screen === 'attract' && <main className="attract-screen" onClick={() => dispatch({ type: 'wake' })}>
+      {navigation.screen === 'attract' && <main className="attract-screen" onClick={(event) => { if (event.detail === 0) return; playSfx('menu', settings.soundMuted); dispatch({ type: 'wake' }) }}>
         <Brand />
         <div className="attract-demo" aria-hidden="true">
           <span className="demo-player demo-one">P1</span><span className="demo-player demo-two">P2</span>
           <span className="demo-hit">PERFECT!</span><span className="demo-combo">12× COMBO</span>
           <span className="demo-rail"><i /><i /><i /><i /></span>
         </div>
-        <button className="attract-start" onClick={() => dispatch({ type: 'wake' })}>{L('PRESS ANY BUTTON', '按任意键开始')}</button>
+        <button className="attract-start">{L('PRESS ANY BUTTON', '按任意键开始')}</button>
         <p>{L('Your dance. Your game. One or two players.', '你的舞蹈，你的游戏。一人或两人同玩。')}</p>
       </main>}
       {navigation.screen === 'tracking' && <main className="tracking-screen">
@@ -687,7 +698,7 @@ export default function App() {
       {activeScreen === 'practice' && renderPractice()}
       {activeScreen === 'library' && renderLibrary()}
       {navigation.screen !== 'attract' && <Suspense fallback={null}><div className={`camera-dock camera-${navigation.screen === 'tracking' ? 'tracking' : activeScreen === 'arcade' ? arcadePhase : activeScreen}${cameraRunning ? '' : ' camera-off'}`}>
-        <WebcamPanel targetRef={targetRef} videoId={current?.id} videoName={current?.name} onSectionPractice={(deltas) => void recordSectionPractice(deltas)} focus={focus} onFocusChange={setFocus} showSkeletons={settings.showSkeletons} trackHead={settings.trackHead} gamePhase={activeScreen === 'arcade' ? gamePhase : 'lobby'} gameRun={gameRun} onLobbyChange={updateLobby} onGameScores={updateGameScores} onHit={showHit} onScoreDebug={import.meta.env.DEV ? updateScoreDebug : undefined} registrationPlayers={registrationPlayers} onRegistrationPlayersChange={activeScreen === 'practice' ? setRegistrationPlayers : undefined} gestureContext={gestureContext} onGestureAction={handleGestureAction} onRunningChange={setCameraRunning} />
+        <WebcamPanel targetRef={targetRef} videoId={current?.id} videoName={current?.name} onSectionPractice={(deltas) => void recordSectionPractice(deltas)} focus={focus} onFocusChange={setFocus} showSkeletons={settings.showSkeletons} trackHead={settings.trackHead} gamePhase={activeScreen === 'arcade' ? gamePhase : 'lobby'} gameRun={gameRun} onLobbyChange={updateLobby} onGameScores={updateGameScores} onHit={showHit} onScoreDebug={import.meta.env.DEV ? updateScoreDebug : undefined} registrationPlayers={registrationPlayers} onRegistrationPlayersChange={activeScreen === 'practice' ? setRegistrationPlayers : undefined} gestureContext={gestureContext} onGestureAction={handleGestureAction} soundMuted={settings.soundMuted} onRunningChange={setCameraRunning} />
       </div></Suspense>}
       {navigation.screen === 'settings' && <SettingsScreen settings={settings} onChange={updateSettings} onClose={() => dispatch({ type: 'closeSettings' })} />}
     </div>

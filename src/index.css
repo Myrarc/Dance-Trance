@@ -663,37 +663,6 @@ header .sub {
   font-variant-numeric: tabular-nums;
 }
 
-.gesture-command {
-  position: absolute;
-  left: 50%;
-  bottom: 14px;
-  z-index: 12;
-  min-width: 210px;
-  max-width: calc(100% - 28px);
-  overflow: hidden;
-  padding: 9px 14px 12px;
-  border: 1px solid var(--accent);
-  border-radius: 10px;
-  background: rgba(11, 11, 15, 0.88);
-  text-align: center;
-  transform: translateX(-50%);
-  backdrop-filter: blur(6px);
-}
-
-.gesture-command strong,
-.gesture-command span { display: block; }
-.gesture-command strong { font-size: 15px; }
-.gesture-command span { margin-top: 2px; color: var(--muted); font-size: 12px; }
-.gesture-command i {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  height: 4px;
-  background: var(--accent);
-  transform-origin: left;
-}
-
 .transport {
   display: flex;
   align-items: center;
@@ -1714,17 +1683,6 @@ header .sub {
   display: none;
 }
 
-.game-results-stage .gesture-command {
-  bottom: 8px;
-  min-width: 0;
-  width: calc(100% - 16px);
-  padding: 7px 8px 10px;
-}
-
-.game-results-stage .gesture-command strong { font-size: 13px; }
-.game-results-stage .gesture-command span { font-size: 12px; }
-.gesture-command.is-idle i { transform: scaleX(0) !important; }
-
 @media (max-width: 900px) {
   .game-flow.game-results {
     align-items: start;
@@ -1844,8 +1802,7 @@ header .sub {
 .library > :nth-child(3n + 2) { background: var(--cyan) !important; }
 .library > :nth-child(3n) { background: var(--lilac) !important; }
 
-.library-name,
-.gesture-command {
+.library-name {
   color: var(--ink);
   font-family: 'Trance Display', Impact, sans-serif;
   letter-spacing: .04em;
@@ -1872,16 +1829,6 @@ header .sub {
 }
 
 .score-label { color: var(--panel); }
-
-.gesture-command {
-  border: 3px solid var(--ink);
-  border-radius: 6px;
-  background: var(--cyan);
-  box-shadow: 4px 4px 0 var(--ink);
-  backdrop-filter: none;
-}
-
-.gesture-command span { color: var(--ink); }
 
 .gesture-guide {
   border: 3px solid var(--ink);
@@ -2753,10 +2700,6 @@ input[type='range'] { accent-color: var(--accent); }
 .camera-dock .player-lobby { padding: 5px; }
 .camera-dock .player-zone { padding: 7px; }
 .camera-dock .player-zone span { font-size: 12px; }
-.camera-dock .gesture-command { bottom: 4px; min-width: 0; max-width: calc(100% - 8px); padding: 4px; }
-.camera-dock .gesture-command strong { font-size: 14px; }
-.camera-dock .gesture-command span { display: none; }
-
 .camera-tracking {
   top: 50%;
   right: auto;
@@ -2797,7 +2740,6 @@ input[type='range'] { accent-color: var(--accent); }
 }
 .camera-registration .calibration-card strong { font-family: inherit; font-size: 23px; text-transform: none; }
 .camera-registration .calibration-card p, .camera-registration .calibration-card li { font-size: 17px; line-height: 1.4; }
-.camera-registration .gesture-command { display: none; }
 .panels.calibration-active { flex: 0 0 auto; }
 .panels.calibration-active > .panel:first-child { width: 350px; justify-self: end; }
 
@@ -2806,7 +2748,6 @@ input[type='range'] { accent-color: var(--accent); }
 .camera-countdown .webcam-stage, .camera-playing .webcam-stage { aspect-ratio: 16 / 9; }
 .camera-results { z-index: 90; top: 50%; right: 3vw; bottom: auto; width: 46vw; transform: translateY(-50%); }
 .camera-results .webcam-stage { aspect-ratio: 16 / 9; }
-.camera-results .gesture-command span { display: block; }
 .camera-practice { top: 110px; right: 2vw; bottom: 100px; width: 46vw; }
 .camera-practice > .panel { height: 100%; }
 .camera-practice .webcam-stage { flex: 1; aspect-ratio: auto; }
@@ -3036,7 +2977,50 @@ input[type='range'] { accent-color: var(--accent); }
   font-size: 15px; font-weight: 950; letter-spacing: .08em;
 }
 @keyframes gesture-selection { 50% { outline-color: var(--warn); } }
-.camera-home .gesture-command, .camera-library .gesture-command, .camera-setup .gesture-command, .camera-practice .gesture-command { display: none; }
+
+.gesture-cue {
+  position: fixed;
+  z-index: 145;
+  right: 12px;
+  bottom: max(20px, env(safe-area-inset-bottom));
+  left: 12px;
+  width: min(540px, calc(100vw - 24px));
+  margin: auto;
+  padding: 14px 18px 12px;
+  border: 4px solid var(--ink);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--ink);
+  box-shadow: 8px 8px 0 var(--ink);
+  pointer-events: none;
+  animation: gesture-cue-in .18s cubic-bezier(.2,.8,.2,1) both;
+}
+.gesture-cue-heading { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; align-items: center; gap: 14px; }
+.gesture-cue-symbol { display: grid; place-items: center; width: 64px; height: 64px; border: 3px solid var(--ink); border-radius: 8px; background: var(--cyan); font-size: 44px; font-weight: 950; line-height: 1; }
+.gesture-cue-confirm .gesture-cue-symbol, .gesture-cue-back .gesture-cue-symbol { background: var(--warn); }
+.gesture-cue-heading strong, .gesture-cue-pose { display: block; overflow-wrap: anywhere; }
+.gesture-cue-pose { font-size: 13px; font-weight: 950; letter-spacing: .1em; }
+.gesture-cue-heading strong { font-size: clamp(24px, 2.4vw, 34px); font-weight: 950; line-height: 1.05; text-transform: uppercase; }
+.gesture-cue-count { min-width: 72px; color: var(--accent); font-family: 'Trance Display', Impact, sans-serif; font-size: 46px; line-height: 1; text-align: right; }
+.gesture-cue-count small { color: var(--ink); font-size: 18px; }
+.gesture-cue-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
+.gesture-cue-steps i { height: 13px; border: 2px solid var(--ink); border-radius: 3px; background: var(--panel-soft); }
+.gesture-cue-steps i.is-lit { background: var(--warn); box-shadow: inset 0 -3px 0 rgba(48, 35, 63, .2); }
+.gesture-cue-track { overflow: hidden; height: 12px; margin-top: 8px; border: 2px solid var(--ink); border-radius: 5px; background: var(--panel-soft); }
+.gesture-cue-track i { display: block; height: 100%; background: var(--cyan); transition: width .18s ease-out; }
+.gesture-cue p { margin-top: 7px; font-size: 14px; font-weight: 800; line-height: 1.2; }
+@keyframes gesture-cue-in { from { opacity: 0; translate: 0 16px; scale: .96; } to { opacity: 1; translate: 0 0; scale: 1; } }
+@media (max-width: 560px) {
+  .gesture-cue { bottom: max(10px, env(safe-area-inset-bottom)); padding: 10px 12px; }
+  .gesture-cue-heading { grid-template-columns: 48px minmax(0, 1fr) auto; gap: 9px; }
+  .gesture-cue-symbol { width: 48px; height: 48px; font-size: 34px; }
+  .gesture-cue-heading strong { font-size: 22px; }
+  .gesture-cue-pose { font-size: 11px; }
+  .gesture-cue-count { min-width: 56px; font-size: 34px; }
+  .gesture-cue-count small { font-size: 14px; }
+}
+@media (prefers-reduced-motion: reduce) { .gesture-cue { animation: none; } .gesture-cue-track i { transition: none; } }
+.reduce-effects .gesture-cue { animation: none; }
 
 /* Song loading is the only step between choosing a track and the round. */
 .song-loading-screen {
