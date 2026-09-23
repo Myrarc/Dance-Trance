@@ -6,11 +6,17 @@ import {
   advanceGestureHold,
   advancePauseHold,
   detectMenuGesture,
+  gestureLabel,
   inPlayerZone,
   isRightHandRaised,
   playerScreenX,
   type GestureHold,
 } from '../src/pose/gestures.ts'
+
+test('song picker labels match its circular left and right browsing', () => {
+  assert.equal(gestureLabel('previous', 'songPicker'), 'Next song')
+  assert.equal(gestureLabel('next', 'songPicker'), 'Previous song')
+})
 
 test('a held still cross pauses once and moving or releasing cancels it', () => {
   let reading = advancePauseHold(null, true, 0.5, 0)

@@ -12,7 +12,7 @@ const LM = {
 } as const
 
 export type MenuGesture = 'previous' | 'next' | 'confirm' | 'back'
-export type GestureContext = 'library' | 'lobby' | 'results' | 'menu'
+export type GestureContext = 'library' | 'lobby' | 'results' | 'menu' | 'songPicker'
 export type PauseHold = { since: number; center: number } | null
 export const PAUSE_HOLD_MS = 2000
 
@@ -167,6 +167,12 @@ export function advancePauseHold(hold: PauseHold, crossed: boolean, center: numb
 }
 
 export function gestureLabel(gesture: MenuGesture, context: GestureContext): string {
+  if (context === 'songPicker') {
+    if (gesture === 'previous') return 'Next song'
+    if (gesture === 'next') return 'Previous song'
+    if (gesture === 'back') return 'Go back'
+    return 'Play selected song'
+  }
   if (context === 'menu') {
     if (gesture === 'previous') return 'Previous option'
     if (gesture === 'next') return 'Next option'

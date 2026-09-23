@@ -43,6 +43,18 @@
         "rule": "design-system-font-size",
         "value": "30px",
         "createdAt": "2026-09-23T03:36:30.083Z"
+      },
+      {
+        "rule": "design-system-font-size",
+        "value": "42px",
+        "createdAt": "2026-09-23T04:19:42.052Z",
+        "reason": "Agent: standing-distance gesture label uses the documented large arcade display range"
+      },
+      {
+        "rule": "design-system-font-size",
+        "value": "36px",
+        "createdAt": "2026-09-23T04:19:46.562Z",
+        "reason": "Agent: mobile library heading uses the documented arcade display range"
       }
     ]
   }

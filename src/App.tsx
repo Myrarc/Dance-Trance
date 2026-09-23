@@ -62,7 +62,7 @@ export default function App() {
   const [scoreDebug, setScoreDebug] = useState<ScoreDebug[]>([])
   const [hitFeedback, setHitFeedback] = useState<{ id: number; grade: Exclude<HitGrade, 'miss'>; target: CueEvent } | null>(null)
   const [gestureSelectedId, setGestureSelectedId] = useState<string | null>(null)
-  const [previewSrc, setPreviewSrc] = useState<string | null>(null)
+  const [previewSrc, setPreviewSrc] = useState<{ id: string; url: string } | null>(null)
   const [previewPaused, setPreviewPaused] = useState(false)
   const [menuLabel, setMenuLabel] = useState('')
   const [filePickerNotice, setFilePickerNotice] = useState(false)
@@ -165,7 +165,7 @@ export default function App() {
     wasLobbyReadyRef.current = lobby.ready
   }, [navigation.screen, lobby.ready])
 
-  const previewEntry = library.find((entry) => entry.id === gestureSelectedId)
+  const previewEntry = library.find((entry) => entry.id === gestureSelectedId) ?? library[0]
   const previewId = !src && (activeScreen === 'arcade' || activeScreen === 'practice') && previewEntry?.hasVideo ? previewEntry.id : null
   useEffect(() => {
     setPreviewSrc(null)
@@ -175,7 +175,7 @@ export default function App() {
     void getVideo(previewId).then((blob) => {
       if (!blob || cancelled) return
       url = URL.createObjectURL(blob)
-      setPreviewSrc(url)
+      setPreviewSrc({ id: previewId, url })
     })
     return () => { cancelled = true; if (url) URL.revokeObjectURL(url) }
   }, [previewId])
@@ -398,8 +398,9 @@ export default function App() {
     fileInputRef.current?.click()
   }
 
+  const pickingSong = !src && navigation.screen !== 'settings' && (activeScreen === 'arcade' || activeScreen === 'practice')
   const gestureContext: GestureContext | null = lobby.ready && navigation.screen !== 'tracking' &&
-    navigation.screen !== 'attract' && !(activeScreen === 'arcade' && (arcadePhase === 'playing' || arcadePhase === 'countdown')) ? 'menu' : null
+    navigation.screen !== 'attract' && !(activeScreen === 'arcade' && (arcadePhase === 'playing' || arcadePhase === 'countdown')) ? pickingSong ? 'songPicker' : 'menu' : null
   const hasTrack = !!track
 
   const menuItems = () => {
@@ -423,12 +424,13 @@ export default function App() {
     if (!gestureContext) return
     const frame = requestAnimationFrame(() => {
       const items = menuItems()
-      const first = items.find((item) => item.hasAttribute('data-gesture-default')) ??
+      const first = (pickingSong ? items.find((item) => item.getAttribute('data-track-id') === previewEntry?.id) : null) ??
+        items.find((item) => item.hasAttribute('data-gesture-default')) ??
         (activeScreen === 'arcade' || activeScreen === 'practice' || activeScreen === 'library' ? items.find((item) => item.hasAttribute('data-track-id')) : null) ?? items[0]
       if (first) selectMenuItem(first)
     })
     return () => cancelAnimationFrame(frame)
-  }, [navigation.screen, arcadePhase, currentId, library.length, hasTrack, gestureContext, activeScreen])
+  }, [navigation.screen, arcadePhase, currentId, library.length, hasTrack, gestureContext, activeScreen, pickingSong, previewEntry?.id])
 
   const handleGestureAction = (gesture: MenuGesture) => {
     if (activeScreen === 'arcade' && arcadePhase === 'playing' && gesture === 'back') {
@@ -442,6 +444,14 @@ export default function App() {
       else if (activeScreen === 'arcade' && (arcadePhase === 'results' || arcadePhase === 'registration')) chooseSong()
       else if (navigation.screen === 'home') dispatch({ type: 'quitHome' })
       else dispatch({ type: 'openHome' })
+      return
+    }
+    if (pickingSong && previewEntry) {
+      if (gesture === 'confirm') void openEntry(previewEntry, activeScreen)
+      else {
+        const index = library.findIndex((entry) => entry.id === previewEntry.id)
+        setGestureSelectedId(library[(index + (gesture === 'previous' ? 1 : -1) + library.length) % library.length].id)
+      }
       return
     }
     const items = menuItems()
@@ -468,23 +478,32 @@ export default function App() {
       onDragOver={(event) => { event.preventDefault(); setDragOver(true) }}
       onDragLeave={() => setDragOver(false)}
       onDrop={(event) => { event.preventDefault(); setDragOver(false); void loadFile(event.dataTransfer.files?.[0], destination) }}>
-      <div className="picker-heading"><h1>{L(destination === 'arcade' ? 'Select your track' : 'Select a routine', destination === 'arcade' ? '选择歌曲' : '选择练习')}</h1><p>{L('Hold an arm out to browse. Raise your right hand to play.', '伸出手臂浏览，举起右手开始。')}</p></div>
+      <div className="picker-heading"><h1>{L(destination === 'arcade' ? 'Select your track' : 'Select a routine', destination === 'arcade' ? '选择歌曲' : '选择练习')}</h1><p>{L('Left arm: next song · Right arm: previous song · Raise your right hand to play.', '左臂：下一首 · 右臂：上一首 · 举起右手开始。')}</p></div>
       <div className="picker-stage">
-        <div className="picker-library"><Library entries={library} stats={stats} records={records} currentId={currentId} selectedId={gestureSelectedId} onPreview={(entry) => setGestureSelectedId(entry.id)} onOpen={(entry) => void openEntry(entry, destination)} onForget={(entry) => void forgetEntry(entry)} emptyHint={T('Your prepared songs will appear here.')} /></div>
-        {previewEntry && <aside className="picker-preview" aria-label={L('Track preview', '歌曲预览')}>
-          <div className="picker-preview-media">
-            {previewSrc ? <video ref={previewRef} src={previewSrc} playsInline preload="auto" onLoadedMetadata={(event) => {
+        {library.length ? <div className="song-carousel" role="group" aria-label={L('Song picker', '歌曲选择')}>
+          {([library.length > 1 ? library[(library.findIndex((entry) => entry.id === previewEntry.id) - 1 + library.length) % library.length] : null, previewEntry, library.length > 2 ? library[(library.findIndex((entry) => entry.id === previewEntry.id) + 1) % library.length] : null] as const).map((entry, slot) => entry ? <button
+            key={entry.id}
+            className={`song-card song-card-${slot === 0 ? 'left' : slot === 1 ? 'center' : 'right'}`}
+            data-track-id={entry.id}
+            data-gesture-label={entry.name.replace(/\.[^.]+$/, '')}
+            aria-current={slot === 1 ? 'true' : undefined}
+            onFocus={() => { if (slot !== 1) setGestureSelectedId(entry.id) }}
+            onClick={() => { if (slot === 1) void openEntry(entry, destination); else setGestureSelectedId(entry.id) }}
+          >
+            <span className="song-card-media">
+              {slot === 1 && previewSrc?.id === entry.id ? <video ref={previewRef} src={previewSrc.url} playsInline preload="auto" onLoadedMetadata={(event) => {
               const video = event.currentTarget
               previewStartRef.current = Math.min(12, Math.max(0, video.duration - 8))
               video.currentTime = previewStartRef.current
             }} onCanPlay={(event) => { void event.currentTarget.play().catch(() => setPreviewPaused(true)) }} onPlay={() => setPreviewPaused(false)} onPause={() => setPreviewPaused(true)} onTimeUpdate={(event) => {
               if (event.currentTarget.currentTime >= previewStartRef.current + 7) event.currentTarget.currentTime = previewStartRef.current
-            }} /> : previewEntry.thumb && <img src={previewEntry.thumb} alt="" />}
-            {previewPaused && previewSrc && <button className="btn primary preview-play" onClick={() => { void previewRef.current?.play() }}>{L('Play preview', '播放预览')}</button>}
-          </div>
-          <strong title={previewEntry.name}>{previewEntry.name.replace(/\.[^.]+$/, '')}</strong>
-          <span>{L('Short preview · plays on repeat', '简短预览 · 循环播放')}</span>
-        </aside>}
+            }} /> : entry.thumb && <img src={entry.thumb} alt="" />}
+            </span>
+            <strong title={entry.name}>{entry.name.replace(/\.[^.]+$/, '')}</strong>
+            <span>{slot === 1 ? entry.hasVideo ? L('Preview loops · select to dance', '循环预览 · 选择后开始跳舞') : L('Add video again to play', '重新添加视频以开始游戏') : L('Browse to this song', '浏览这首歌曲')}</span>
+          </button> : null)}
+        </div> : <p className="library-empty">{T('Your prepared songs will appear here.')}</p>}
+        {previewPaused && previewSrc?.id === previewEntry?.id && <button className="btn primary preview-play" onClick={() => { void previewRef.current?.play() }}>{L('Play preview', '播放预览')}</button>}
       </div>
       <div className="picker-import"><button className="btn primary" data-needs-file onClick={() => openFilePicker(destination)}>{L('+ Add a video', '+ 添加视频')}</button><span>{L('Drop a dance video here, or choose one to play.', '将舞蹈视频拖到这里，或选择一个开始游戏。')}</span></div>
     </section>
@@ -568,7 +587,7 @@ export default function App() {
         <WebcamPanel targetRef={targetRef} videoId={current?.id} videoName={current?.name} onSectionPractice={(deltas) => void recordSectionPractice(deltas)} focus={focus} onFocusChange={setFocus} showSkeletons={settings.showSkeletons} trackHead={settings.trackHead} gamePhase={activeScreen === 'arcade' ? gamePhase : 'lobby'} gameRun={gameRun} onLobbyChange={updateLobby} onGameScores={updateGameScores} onHit={showHit} onScoreDebug={import.meta.env.DEV ? updateScoreDebug : undefined} requireCalibration={activeScreen === 'arcade' && arcadePhase === 'registration'} registrationPlayers={registrationPlayers} onRegistrationPlayersChange={activeScreen === 'practice' ? setRegistrationPlayers : undefined} onCalibrationChange={updateCalibration} gestureContext={gestureContext} onGestureAction={handleGestureAction} onRunningChange={setCameraRunning} />
       </div></Suspense>}
       {navigation.screen === 'settings' && <SettingsScreen settings={settings} onChange={updateSettings} onClose={() => dispatch({ type: 'closeSettings' })} />}
-      {gestureContext && <div className="menu-gesture-hud" aria-live="polite"><b>{L('MOVE TO CHOOSE', '移动手臂选择')}</b><span>{filePickerNotice ? L('Use the device to choose a video file.', '请用设备选择视频文件。') : menuLabel || L('Choose an option', '选择选项')}</span><small>{L('Left arm: previous · Right arm: next · Right hand up: select · Cross arms: back', '左臂：上一个 · 右臂：下一个 · 右手举起：选择 · 交叉双臂：返回')}</small></div>}
+      {gestureContext && <div className="menu-gesture-hud" aria-live="polite"><b>{L('MOVE TO CHOOSE', '移动手臂选择')}</b><span>{filePickerNotice ? L('Use the device to choose a video file.', '请用设备选择视频文件。') : menuLabel || L('Choose an option', '选择选项')}</span><small>{pickingSong ? L('Left arm: next song · Right arm: previous song · Right hand up: play · Cross arms: back', '左臂：下一首 · 右臂：上一首 · 右手举起：开始 · 交叉双臂：返回') : L('Left arm: previous · Right arm: next · Right hand up: select · Cross arms: back', '左臂：上一个 · 右臂：下一个 · 右手举起：选择 · 交叉双臂：返回')}</small></div>}
     </div>
   )
 }

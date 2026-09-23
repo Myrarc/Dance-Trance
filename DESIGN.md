@@ -75,7 +75,7 @@ Use square-ish radii: 6px cards, 7px media and controls, 10px panels. Main surfa
 
 ## Layout
 
-The desktop viewport is a vertical poster: wordmark and controls, then the dance stage. The attract screen is full-bleed. The initial tracking and registration screens make the live camera dominant, with the reference video as a small preview when present. Menus keep a camera preview and a large coral selected marker that reads from across the room. The song picker puts large saved-track covers in the center and a short local video preview beside them. During play the reference video is dominant and the camera is picture-in-picture. At 900px and below, panels stack and decorative background shapes disappear. Gesture and pointer/keyboard navigation must remain equally usable.
+The desktop viewport is a vertical poster: wordmark and controls, then the dance stage. The attract screen is full-bleed. The initial tracking and registration screens make the live camera dominant, with the reference video as a small preview when present. Menus keep a camera preview and a large coral selected marker that reads from across the room. The song picker uses a circular carousel with the selected song and its looping video at the center. During play the reference video is dominant and the camera is picture-in-picture. At 900px and below, panels stack and decorative background shapes disappear. Gesture and pointer/keyboard navigation must remain equally usable.
 
 ## Interaction
 

@@ -276,6 +276,7 @@ Object.assign(ZH, {
   'Make a navigation gesture': '做出导航手势',
   'Previous song': '上一首',
   'Next song': '下一首',
+  'Play selected song': '播放选中的歌曲',
   'Close song list': '关闭歌曲列表',
   'Choose a song': '选择歌曲',
   'Load selected song': '载入所选歌曲',
